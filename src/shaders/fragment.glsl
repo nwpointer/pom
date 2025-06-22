@@ -22,12 +22,12 @@ vec2 parallaxOcclusionMap(vec3 V) {
     float currentLayerDepth = 0.0;
 
     while(currentLayerDepth < currentDepthMapValue) {
-        currentTexCoords -= deltaTexCoords;
+        currentTexCoords += deltaTexCoords;
         currentDepthMapValue = texture2D(uDisplacementMap, currentTexCoords).r;
         currentLayerDepth += layerDepth;
     }
     
-    vec2 prevTexCoords = currentTexCoords + deltaTexCoords;
+    vec2 prevTexCoords = currentTexCoords - deltaTexCoords;
     float afterDepth  = currentDepthMapValue - currentLayerDepth;
     float beforeDepth = texture2D(uDisplacementMap, prevTexCoords).r - currentLayerDepth + layerDepth;
     float weight = afterDepth / (afterDepth - beforeDepth);
