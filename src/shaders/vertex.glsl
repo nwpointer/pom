@@ -4,9 +4,16 @@ varying vec2 vUv;
 varying vec3 vWorldPosition;
 varying mat3 vTBN;
 
+uniform sampler2D uVertexDisplacementMap;
+uniform float uVertexDisplacementScale;
+
 void main() {
     vUv = uv;
-    vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+
+    float displacement = texture2D(uVertexDisplacementMap, uv).r;
+    vec3 displacedPosition = position + normal * displacement * uVertexDisplacementScale;
+
+    vWorldPosition = (modelMatrix * vec4(displacedPosition, 1.0)).xyz;
 
     vec3 worldNormal = normalize(mat3(modelMatrix) * normal);
     vec3 worldTangent = normalize(mat3(modelMatrix) * tangent.xyz);
@@ -14,5 +21,5 @@ void main() {
 
     vTBN = mat3(worldTangent, worldBitangent, worldNormal);
 
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
 } 
