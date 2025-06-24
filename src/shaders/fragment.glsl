@@ -16,7 +16,35 @@ uniform float uShadowHardness;
 float getTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
     float vertexHeight = textureGrad(uVertexDisplacementMap, texCoords, dx, dy).r * uVertexDisplacementScale;
     float detailHeight = textureGrad(uDisplacementMap, texCoords, dx, dy).r * uDisplacementScale;
-    return (vertexHeight + detailHeight) / (uVertexDisplacementScale + uDisplacementScale);
+    return (vertexHeight + detailHeight) / (uVertexDisplacementScale + uDisplacementScale) ;
+}
+
+vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
+    // Use a fixed number of layers for simplicity
+    const float numLayers = 32.0;
+    float layerDepth = 1.0 / numLayers;
+    vec2 P = V.xy / V.z * (uVertexDisplacementScale + uDisplacementScale);
+    vec2 deltaTexCoords = P / numLayers;
+
+    // Simple layer stepping - find first intersection
+    vec2 currentTexCoords = vUv;
+    float currentLayerHeight = 1.0;
+    float currentDepthMapValue = getTotalSurfaceHeight(currentTexCoords, dx, dy);
+
+    // Step through layers until we find an intersection
+    while(currentDepthMapValue < currentLayerHeight && currentLayerHeight > 0.0) {
+        currentLayerHeight -= layerDepth;
+        currentTexCoords -= deltaTexCoords;
+        currentDepthMapValue = getTotalSurfaceHeight(currentTexCoords, dx, dy);
+    }
+
+    // Check bounds and set alpha
+    float alpha = 1.0;
+    if (currentTexCoords.x < 0.0 || currentTexCoords.x > 1.0 || currentTexCoords.y < 0.0 || currentTexCoords.y > 1.0) {
+        alpha = 0.0;
+    }
+
+    return vec3(currentTexCoords, alpha);
 }
 
 vec3 parallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
@@ -26,7 +54,7 @@ vec3 parallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     float numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), V)));
 
     float layerDepth = 1.0 / numLayers;
-    vec2 P = V.xy / V.z * (uDisplacementScale + uVertexDisplacementScale);
+    vec2 P = V.xy / V.z * (uVertexDisplacementScale + uDisplacementScale);
     vec2 deltaTexCoords = P / numLayers;
 
     // Coarse search to find an interval containing the intersection
@@ -121,4 +149,5 @@ void main() {
     vec3 lighting = (ambient * shadow) + (diffuseColor.rgb * diff * shadow);
 
     gl_FragColor = vec4(lighting, alpha);
+    // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 } 

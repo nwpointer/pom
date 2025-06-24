@@ -5,14 +5,19 @@ varying vec3 vWorldPosition;
 varying mat3 vTBN;
 
 uniform sampler2D uVertexDisplacementMap;
+uniform sampler2D uDisplacementMap;
 uniform float uVertexDisplacementScale;
 uniform float uDisplacementScale;
 
 void main() {
     vUv = uv;
 
-    float displacement = texture2D(uVertexDisplacementMap, uv).r;
-    vec3 displacedPosition = position + normal * (displacement * uVertexDisplacementScale + uDisplacementScale);
+    // Sample both displacement maps and combine them
+    float vertexDisplacement = texture2D(uVertexDisplacementMap, uv).r * uVertexDisplacementScale;
+    float detailDisplacement = texture2D(uDisplacementMap, uv).r * uDisplacementScale;
+    float totalDisplacement = vertexDisplacement + detailDisplacement;
+    
+    vec3 displacedPosition = position + normal * totalDisplacement;
 
     vWorldPosition = (modelMatrix * vec4(displacedPosition, 1.0)).xyz;
 

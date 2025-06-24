@@ -3,6 +3,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 import vertexShader from './shaders/vertex.glsl?raw';
 import fragmentShader from './shaders/fragment.glsl?raw';
+import vertexShaderDense from './shaders/vertex-dense.glsl?raw';
+import fragmentShaderDense from './shaders/fragment-dense.glsl?raw';
+
+// Initial displacement values
+const INITIAL_DISPLACEMENT_SCALE = 0.05;
+const INITIAL_VERTEX_DISPLACEMENT_SCALE = 0.0;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.001, 100);
@@ -12,9 +18,10 @@ document.body.appendChild(renderer.domElement);
 
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
-camera.position.z = 1;
+camera.position.z = 2;
+camera.position.y = 0.2;
 
-const geometry = new THREE.PlaneGeometry(1, 1, 256, 256);
+const geometry = new THREE.PlaneGeometry(1, 1, 18, 18);
 geometry.computeTangents();
 
 const loader = new THREE.TextureLoader();
@@ -24,7 +31,7 @@ const normalMap = loader.load('/gray_rocks/gray_rocks_nor_gl_2k.jpg');
 normalMap.anisotropy = maxAnisotropy;
 const displacementMap = loader.load('/gray_rocks/gray_rocks_disp_2k.jpg');
 displacementMap.anisotropy = maxAnisotropy;
-const vertexDisplacementMap = loader.load('/gray_rocks/hill.jpg');
+const vertexDisplacementMap = loader.load('/hill.jpg');
 vertexDisplacementMap.anisotropy = maxAnisotropy;
 
 const material = new THREE.ShaderMaterial({
@@ -36,9 +43,9 @@ const material = new THREE.ShaderMaterial({
         uNormalMap: { value: normalMap },
         uDisplacementMap: { value: displacementMap },
         uVertexDisplacementMap: { value: vertexDisplacementMap },
-        uDisplacementScale: { value: 0.05 },
+        uDisplacementScale: { value: INITIAL_DISPLACEMENT_SCALE },
         uDisplacementBias: { value: -0.025 },
-        uVertexDisplacementScale: { value: 0.1 },
+        uVertexDisplacementScale: { value: INITIAL_VERTEX_DISPLACEMENT_SCALE },
         uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
         uCameraPosition: { value: new THREE.Vector3() },
         uShadowHardness: { value: 8.0 },
@@ -46,7 +53,33 @@ const material = new THREE.ShaderMaterial({
 });
 
 const plane = new THREE.Mesh(geometry, material);
+// Position the POM mesh to the left
+plane.position.x = -0.5;
 scene.add(plane);
+
+// Create dense mesh for comparison
+const denseGeometry = new THREE.PlaneGeometry(1, 1, 512, 512); // Much denser geometry
+denseGeometry.computeTangents();
+
+const denseMaterial = new THREE.ShaderMaterial({
+    vertexShader: vertexShaderDense,
+    fragmentShader: fragmentShaderDense,
+    uniforms: {
+        uDiffuseMap: { value: diffuseMap },
+        uNormalMap: { value: normalMap },
+        uDisplacementMap: { value: displacementMap },
+        uVertexDisplacementMap: { value: vertexDisplacementMap },
+        uDisplacementScale: { value: INITIAL_DISPLACEMENT_SCALE },
+        uVertexDisplacementScale: { value: INITIAL_VERTEX_DISPLACEMENT_SCALE },
+        uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+        uCameraPosition: { value: new THREE.Vector3() },
+    },
+});
+
+const densePlane = new THREE.Mesh(denseGeometry, denseMaterial);
+// Position the dense mesh to the right
+densePlane.position.x = 0.5;
+scene.add(densePlane);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -62,10 +95,12 @@ const textureUpload = {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
                 const url = URL.createObjectURL(file);
-                material.uniforms.uDiffuseMap.value = textureLoader.load(url, (texture) => {
+                const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
                     texture.needsUpdate = true;
                 });
+                material.uniforms.uDiffuseMap.value = texture;
+                denseMaterial.uniforms.uDiffuseMap.value = texture;
             }
         };
         input.click();
@@ -77,10 +112,12 @@ const textureUpload = {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
                 const url = URL.createObjectURL(file);
-                material.uniforms.uNormalMap.value = textureLoader.load(url, (texture) => {
+                const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
                     texture.needsUpdate = true;
                 });
+                material.uniforms.uNormalMap.value = texture;
+                denseMaterial.uniforms.uNormalMap.value = texture;
             }
         };
         input.click();
@@ -92,10 +129,12 @@ const textureUpload = {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
                 const url = URL.createObjectURL(file);
-                material.uniforms.uDisplacementMap.value = textureLoader.load(url, (texture) => {
+                const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
                     texture.needsUpdate = true;
                 });
+                material.uniforms.uDisplacementMap.value = texture;
+                denseMaterial.uniforms.uDisplacementMap.value = texture;
             }
         };
         input.click();
@@ -107,10 +146,12 @@ const textureUpload = {
             const file = (e.target as HTMLInputElement).files?.[0];
             if (file) {
                 const url = URL.createObjectURL(file);
-                material.uniforms.uVertexDisplacementMap.value = textureLoader.load(url, (texture) => {
+                const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
                     texture.needsUpdate = true;
                 });
+                material.uniforms.uVertexDisplacementMap.value = texture;
+                denseMaterial.uniforms.uVertexDisplacementMap.value = texture;
             }
         };
         input.click();
@@ -122,14 +163,31 @@ gui.add(textureUpload, 'normal').name('Upload Normal');
 gui.add(textureUpload, 'displacement').name('Upload Parallax');
 gui.add(textureUpload, 'vertexDisplacement').name('Upload Displacement');
 
-gui.add(material.uniforms.uDisplacementScale, 'value', 0, 0.2, 0.001).name('Parallax Scale');
+gui.add(material.uniforms.uDisplacementScale, 'value', 0, 0.2, 0.001).name('Parallax Scale').onChange((value: number) => {
+    denseMaterial.uniforms.uDisplacementScale.value = value;
+});
 gui.add(material.uniforms.uDisplacementBias, 'value', -0.1, 0.1, 0.001).name('Parallax Bias');
-gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name('Displacement Scale');
+gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name('Displacement Scale').onChange((value: number) => {
+    denseMaterial.uniforms.uVertexDisplacementScale.value = value;
+});
 gui.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
 
+// Add wireframe toggle
+const wireframeControl = {
+    wireframe: false
+};
+gui.add(wireframeControl, 'wireframe').name('Wireframe').onChange((value: boolean) => {
+    material.wireframe = value;
+    denseMaterial.wireframe = value;
+});
+
 const lightFolder = gui.addFolder('Light Direction');
-lightFolder.add(material.uniforms.uLightDirection.value, 'x', -1, 1, 0.01).name('X');
-lightFolder.add(material.uniforms.uLightDirection.value, 'y', -1, 1, 0.01).name('Y');
+lightFolder.add(material.uniforms.uLightDirection.value, 'x', -1, 1, 0.01).name('X').onChange((value: number) => {
+    denseMaterial.uniforms.uLightDirection.value.x = value;
+});
+lightFolder.add(material.uniforms.uLightDirection.value, 'y', -1, 1, 0.01).name('Y').onChange((value: number) => {
+    denseMaterial.uniforms.uLightDirection.value.y = value;
+});
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -141,6 +199,7 @@ function animate() {
     requestAnimationFrame(animate);
     controls.update();
     material.uniforms.uCameraPosition.value.copy(camera.position);
+    denseMaterial.uniforms.uCameraPosition.value.copy(camera.position);
     renderer.render(scene, camera);
 }
 
