@@ -7,8 +7,9 @@ import vertexShaderDense from './shaders/vertex-dense.glsl?raw';
 import fragmentShaderDense from './shaders/fragment-dense.glsl?raw';
 
 // Initial displacement values
+// const INITIAL_DISPLACEMENT_SCALE = 0.05;
 const INITIAL_DISPLACEMENT_SCALE = 0.05;
-const INITIAL_VERTEX_DISPLACEMENT_SCALE = 0.0;
+const INITIAL_VERTEX_DISPLACEMENT_SCALE = 0.2;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.001, 100);
@@ -18,8 +19,13 @@ document.body.appendChild(renderer.domElement);
 
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
-camera.position.z = 2;
-camera.position.y = 0.2;
+// Set initial camera angle to 45 degrees
+const initialAngle = 90; // degrees
+const radius = 2;
+camera.position.y = Math.sin(-initialAngle * Math.PI / 180) * radius;
+camera.position.z = Math.cos(-initialAngle * Math.PI / 180) * radius;
+camera.position.x = 0.0;
+camera.lookAt(0, 0, 0);
 
 const geometry = new THREE.PlaneGeometry(1, 1, 18, 18);
 geometry.computeTangents();
@@ -171,6 +177,23 @@ gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name
     denseMaterial.uniforms.uVertexDisplacementScale.value = value;
 });
 gui.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
+
+// Add camera angle control
+const cameraControl = {
+    angle: initialAngle
+};
+
+function updateCameraPosition(angle: number) {
+    const angleRad = -angle * Math.PI / 180;
+    camera.position.x = 0.0;
+    camera.position.y = Math.sin(angleRad) * radius;
+    camera.position.z = Math.cos(angleRad) * radius;
+    camera.lookAt(0, 0, 0);
+}
+
+gui.add(cameraControl, 'angle', 0, 360, 1).name('Camera Angle (°)').onChange((value: number) => {
+    updateCameraPosition(value);
+});
 
 // Add wireframe toggle
 const wireframeControl = {

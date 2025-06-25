@@ -16,26 +16,40 @@ uniform float uShadowHardness;
 float getTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
     float vertexHeight = textureGrad(uVertexDisplacementMap, texCoords, dx, dy).r * uVertexDisplacementScale;
     float detailHeight = textureGrad(uDisplacementMap, texCoords, dx, dy).r * uDisplacementScale;
-    return (vertexHeight + detailHeight) / (uVertexDisplacementScale + uDisplacementScale) ;
+    float totalScale = uVertexDisplacementScale + uDisplacementScale;
+    // Avoid division by zero when scales are zero
+    if (totalScale < 0.001) {
+        return 0.5; // Return neutral height when no displacement
+    }
+    return (vertexHeight + detailHeight) / totalScale;
+}
+
+// Helper function to get displacement height from 0 to uDisplacementScale
+float simpleGetTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
+    return textureGrad(uDisplacementMap, texCoords, dx, dy).r * uDisplacementScale;
 }
 
 vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     // Use a fixed number of layers for simplicity
     const float numLayers = 32.0;
-    float layerDepth = 1.0 / numLayers;
-    vec2 P = V.xy / V.z * (uVertexDisplacementScale + uDisplacementScale);
-    vec2 deltaTexCoords = P / numLayers;
+    float layerDepth = uDisplacementScale / numLayers;
+    
+    // Calculate parallax offset without V.z trick
+    // Use view angle to determine step size - steeper angles need larger steps
+    float viewAngle = abs(V.z); // How perpendicular the view is to the surface
+    float parallaxScale = (1.0 - viewAngle) * 2.0; // Scale based on viewing angle
+    vec2 deltaTexCoords = normalize(V.xy) * parallaxScale * uDisplacementScale / numLayers;
 
     // Simple layer stepping - find first intersection
     vec2 currentTexCoords = vUv;
-    float currentLayerHeight = 1.0;
-    float currentDepthMapValue = getTotalSurfaceHeight(currentTexCoords, dx, dy);
+    float currentLayerHeight = uDisplacementScale; // Start from max height
+    float currentDepthMapValue = simpleGetTotalSurfaceHeight(currentTexCoords, dx, dy);
 
     // Step through layers until we find an intersection
     while(currentDepthMapValue < currentLayerHeight && currentLayerHeight > 0.0) {
         currentLayerHeight -= layerDepth;
         currentTexCoords -= deltaTexCoords;
-        currentDepthMapValue = getTotalSurfaceHeight(currentTexCoords, dx, dy);
+        currentDepthMapValue = simpleGetTotalSurfaceHeight(currentTexCoords, dx, dy);
     }
 
     // Check bounds and set alpha
@@ -125,9 +139,21 @@ void main() {
     vec3 tangentViewDir = normalize(transpose(vTBN) * worldViewDir);
     vec2 dx = dFdx(vUv);
     vec2 dy = dFdy(vUv);
-    vec3 pomResult = parallaxOcclusionMap(tangentViewDir, dx, dy);
-    vec2 parallaxUv = pomResult.xy;
-    float alpha = pomResult.z;
+    
+    // Check if we need parallax mapping at all
+    float totalDisplacementScale = uVertexDisplacementScale + uDisplacementScale;
+    vec2 parallaxUv;
+    float alpha = 1.0;
+    
+    if (totalDisplacementScale < 0.001) {
+        // No displacement, use original UVs
+        parallaxUv = vUv;
+    } else {
+        // Apply parallax occlusion mapping
+        vec3 pomResult = simpleParallaxOcclusionMap(tangentViewDir, dx, dy);
+        parallaxUv = pomResult.xy;
+        alpha = pomResult.z;
+    }
 
     if (alpha < 0.5) {
         discard;
@@ -137,11 +163,17 @@ void main() {
     vec3 worldNormal = normalize(vTBN * tangentNormal);
     vec4 diffuseColor = textureGrad(uDiffuseMap, parallaxUv, dx, dy);
 
-    float height = getTotalSurfaceHeight(parallaxUv, dx, dy);
-    vec3 tangentSurfacePos = vec3(parallaxUv, height);
-    
-    vec3 tangentLightDir = normalize(transpose(vTBN) * uLightDirection);
-    float shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
+    // float height = getTotalSurfaceHeight(parallaxUv, dx, dy);
+    // vec3 tangentSurfacePos = vec3(parallaxUv, height);
+    // vec3 tangentLightDir = normalize(transpose(vTBN) * uLightDirection);
+    float shadow;
+    // if (totalDisplacementScale < 0.001) {
+    //     // No displacement, no self-shadowing
+    //     shadow = 1.0;
+    // } else {
+    //     shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
+    // }
+    shadow = 1.0;
 
     vec3 worldLightDir = normalize(uLightDirection);
     float diff = max(dot(worldNormal, worldLightDir), 0.0);
