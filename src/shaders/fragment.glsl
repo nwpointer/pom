@@ -26,7 +26,7 @@ float getTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
 
 // Helper function to get displacement height from 0 to uDisplacementScale
 float simpleGetTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
-    return textureGrad(uDisplacementMap, texCoords, dx, dy).r * uDisplacementScale;
+    return textureGrad(uDisplacementMap, texCoords, dx, dy).r * uDisplacementScale * 2.0;
 }
 
 vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
@@ -37,7 +37,7 @@ vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     // Calculate parallax offset without V.z trick
     // Use view angle to determine step size - steeper angles need larger steps
     float viewAngle = abs(V.z); // How perpendicular the view is to the surface
-    float parallaxScale = (1.0 - viewAngle) * 2.0; // Scale based on viewing angle
+    float parallaxScale = (1.0 - viewAngle) * 1.0; // Scale based on viewing angle
     vec2 deltaTexCoords = normalize(V.xy) * parallaxScale * uDisplacementScale / numLayers;
 
     // Simple layer stepping - find first intersection
@@ -163,17 +163,17 @@ void main() {
     vec3 worldNormal = normalize(vTBN * tangentNormal);
     vec4 diffuseColor = textureGrad(uDiffuseMap, parallaxUv, dx, dy);
 
-    // float height = getTotalSurfaceHeight(parallaxUv, dx, dy);
-    // vec3 tangentSurfacePos = vec3(parallaxUv, height);
-    // vec3 tangentLightDir = normalize(transpose(vTBN) * uLightDirection);
+    float height = getTotalSurfaceHeight(parallaxUv, dx, dy);
+    vec3 tangentSurfacePos = vec3(parallaxUv, height);
+    vec3 tangentLightDir = normalize(transpose(vTBN) * uLightDirection);
     float shadow;
-    // if (totalDisplacementScale < 0.001) {
-    //     // No displacement, no self-shadowing
-    //     shadow = 1.0;
-    // } else {
-    //     shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
-    // }
-    shadow = 1.0;
+    if (totalDisplacementScale < 0.001) {
+        // No displacement, no self-shadowing
+        shadow = 1.0;
+    } else {
+        shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
+    }
+    // shadow = 1.0;
 
     vec3 worldLightDir = normalize(uLightDirection);
     float diff = max(dot(worldNormal, worldLightDir), 0.0);

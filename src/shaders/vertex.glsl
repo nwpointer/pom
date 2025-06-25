@@ -12,7 +12,7 @@ void main() {
     vUv = uv;
 
     float displacement = texture2D(uVertexDisplacementMap, uv).r;
-    vec3 displacedPosition = position + normal * (displacement * uVertexDisplacementScale + uDisplacementScale);
+    vec3 displacedPosition = position + normal * (displacement * uVertexDisplacementScale + uDisplacementScale/2.0);
 
     vWorldPosition = (modelMatrix * vec4(displacedPosition, 1.0)).xyz;
 
