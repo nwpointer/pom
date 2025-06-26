@@ -18,6 +18,7 @@ uniform vec3 uLightDirection;
 uniform float uShadowHardness;
 uniform int uDebugMode; // 0=off, 1=tangent, 2=bitangent, 3=normal, 4=view_dir
 uniform bool uUseSmoothTBN; // true=smooth interpolated, false=physically accurate
+uniform bool uEnableShadows; // true=shadows enabled, false=shadows disabled
 
 // Helper function to calculate TBN matrix per fragment
 mat3 getTBNMatrix() {
@@ -295,13 +296,12 @@ void main() {
     vec3 tangentSurfacePos = vec3(parallaxUv, height);
     vec3 tangentLightDir = normalize(transpose(tbnMatrix) * uLightDirection);
     float shadow;
-    if (totalDisplacementScale < 0.001) {
-        // No displacement, no self-shadowing
+    if (!uEnableShadows || totalDisplacementScale < 0.001) {
+        // Shadows disabled or no displacement, no self-shadowing
         shadow = 1.0;
     } else {
         shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
     }
-    // shadow = 1.0;
 
     // Debug mode visualization
     if (uDebugMode > 0) {
