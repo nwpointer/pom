@@ -56,6 +56,8 @@ const material = new THREE.ShaderMaterial({
         uCameraPosition: { value: new THREE.Vector3() },
         uShadowHardness: { value: 8.0 },
         uDebugMode: { value: 0 },
+        uUseSmoothTBN: { value: true },
+        uEnableShadows: { value: false },
     },
 });
 
@@ -178,6 +180,7 @@ gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name
     denseMaterial.uniforms.uVertexDisplacementScale.value = value;
 });
 gui.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
+gui.add(material.uniforms.uEnableShadows, 'value').name('Enable Shadows');
 
 // Add debug mode control
 const debugModeOptions = {
@@ -191,6 +194,9 @@ const debugModeOptions = {
 };
 
 gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mode');
+
+// Add TBN calculation method control
+gui.add(material.uniforms.uUseSmoothTBN, 'value').name('Smooth TBN (vs Physically Accurate)');
 
 // Add camera angle control
 const cameraControl = {
