@@ -8,7 +8,7 @@ import fragmentShaderDense from './shaders/fragment-dense.glsl?raw';
 
 // Initial displacement values
 // const INITIAL_DISPLACEMENT_SCALE = 0.05;
-const INITIAL_DISPLACEMENT_SCALE = 0.05;
+const INITIAL_DISPLACEMENT_SCALE = 0.005;
 const INITIAL_VERTEX_DISPLACEMENT_SCALE = 0.2;
 
 const scene = new THREE.Scene();
@@ -33,12 +33,20 @@ geometry.computeTangents();
 const loader = new THREE.TextureLoader();
 const diffuseMap = loader.load('/gray_rocks/gray_rocks_diff_2k.jpg');
 diffuseMap.anisotropy = maxAnisotropy;
+diffuseMap.wrapS = THREE.RepeatWrapping;
+diffuseMap.wrapT = THREE.RepeatWrapping;
 const normalMap = loader.load('/gray_rocks/gray_rocks_nor_gl_2k.jpg');
 normalMap.anisotropy = maxAnisotropy;
+normalMap.wrapS = THREE.RepeatWrapping;
+normalMap.wrapT = THREE.RepeatWrapping;
 const displacementMap = loader.load('/gray_rocks/gray_rocks_disp_2k.jpg');
 displacementMap.anisotropy = maxAnisotropy;
+displacementMap.wrapS = THREE.RepeatWrapping;
+displacementMap.wrapT = THREE.RepeatWrapping;
 const vertexDisplacementMap = loader.load('/hill.jpg');
 vertexDisplacementMap.anisotropy = maxAnisotropy;
+vertexDisplacementMap.wrapS = THREE.RepeatWrapping;
+vertexDisplacementMap.wrapT = THREE.RepeatWrapping;
 
 const material = new THREE.ShaderMaterial({
     vertexShader,
@@ -58,6 +66,9 @@ const material = new THREE.ShaderMaterial({
         uDebugMode: { value: 0 },
         uUseSmoothTBN: { value: true },
         uEnableShadows: { value: false },
+        uUseDynamicLayers: { value: false },
+        uPOMMethod: { value: 0 },
+        uTextureRepeat: { value: 10.0 },
     },
 });
 
@@ -82,6 +93,7 @@ const denseMaterial = new THREE.ShaderMaterial({
         uVertexDisplacementScale: { value: INITIAL_VERTEX_DISPLACEMENT_SCALE },
         uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
         uCameraPosition: { value: new THREE.Vector3() },
+        uTextureRepeat: { value: 10.0 },
     },
 });
 
@@ -106,6 +118,8 @@ const textureUpload = {
                 const url = URL.createObjectURL(file);
                 const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
                     texture.needsUpdate = true;
                 });
                 material.uniforms.uDiffuseMap.value = texture;
@@ -123,6 +137,8 @@ const textureUpload = {
                 const url = URL.createObjectURL(file);
                 const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
                     texture.needsUpdate = true;
                 });
                 material.uniforms.uNormalMap.value = texture;
@@ -140,6 +156,8 @@ const textureUpload = {
                 const url = URL.createObjectURL(file);
                 const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
                     texture.needsUpdate = true;
                 });
                 material.uniforms.uDisplacementMap.value = texture;
@@ -157,6 +175,8 @@ const textureUpload = {
                 const url = URL.createObjectURL(file);
                 const texture = textureLoader.load(url, (texture) => {
                     texture.anisotropy = maxAnisotropy;
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
                     texture.needsUpdate = true;
                 });
                 material.uniforms.uVertexDisplacementMap.value = texture;
@@ -181,6 +201,9 @@ gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name
 });
 gui.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
 gui.add(material.uniforms.uEnableShadows, 'value').name('Enable Shadows');
+gui.add(material.uniforms.uTextureRepeat, 'value', 1.0, 50.0, 0.1).name('Texture Repeat').onChange((value: number) => {
+    denseMaterial.uniforms.uTextureRepeat.value = value;
+});
 
 // Add debug mode control
 const debugModeOptions = {
@@ -197,6 +220,17 @@ gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mod
 
 // Add TBN calculation method control
 gui.add(material.uniforms.uUseSmoothTBN, 'value').name('Smooth TBN (vs Physically Accurate)');
+
+// Add dynamic layers control
+gui.add(material.uniforms.uUseDynamicLayers, 'value').name('Dynamic Layers (vs Fixed)');
+
+// Add POM method selection
+const pomMethodOptions = {
+    'Standard POM': 0,
+    'Simple POM': 1,
+    'Full POM': 2
+};
+gui.add(material.uniforms.uPOMMethod, 'value', pomMethodOptions).name('POM Method');
 
 // Add camera angle control
 const cameraControl = {

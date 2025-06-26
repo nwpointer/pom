@@ -6,11 +6,13 @@ uniform sampler2D uDiffuseMap;
 uniform sampler2D uNormalMap;
 uniform vec3 uCameraPosition;
 uniform vec3 uLightDirection;
+uniform float uTextureRepeat;
 
 void main() {
     // Sample textures directly without parallax mapping
-    vec4 diffuseColor = texture2D(uDiffuseMap, vUv);
-    vec3 tangentNormal = texture2D(uNormalMap, vUv).rgb * 2.0 - 1.0;
+    vec2 repeatedUv = vUv * uTextureRepeat;
+    vec4 diffuseColor = texture2D(uDiffuseMap, repeatedUv);
+    vec3 tangentNormal = texture2D(uNormalMap, repeatedUv).rgb * 2.0 - 1.0;
     vec3 worldNormal = normalize(vTBN * tangentNormal);
 
     // Simple lighting calculation
