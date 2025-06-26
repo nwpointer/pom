@@ -18,7 +18,6 @@ uniform vec3 uLightDirection;
 uniform float uShadowHardness;
 uniform int uDebugMode; // 0=off, 1=tangent, 2=bitangent, 3=normal, 4=view_dir
 uniform bool uUseSmoothTBN; // true=smooth interpolated, false=physically accurate
-uniform bool uEnableShadows; // true=shadows enabled, false=no shadows
 
 // Helper function to calculate TBN matrix per fragment
 mat3 getTBNMatrix() {
@@ -119,62 +118,63 @@ vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     // Use a fixed number of layers for simplicity
     const float numLayers = 32.0;
     
-    // Early exit for very steep viewing angles to prevent artifacts
-    float viewAngle = abs(V.z);
-    if (viewAngle < 0.05) {
-        return vec3(vUv, 1.0);
-    }
-    
-    // Reduce parallax effect at glancing angles to prevent warping
-    float parallaxAttenuation = smoothstep(0.05, 0.3, viewAngle);
-    
-    // Standard parallax calculation with angle attenuation
-    vec2 P = V.xy / max(viewAngle, 0.1) * uDisplacementScale * parallaxAttenuation;
+    // Smooth V.z influence for stable parallax
+    float smoothVz = smoothstep(0.0, 1.0, abs(V.z)); // Smooth S-curve transition
+    float reducedVz = mix(0.5, 1.0, smoothVz); // Blend with smoother transition
+    vec2 P = V.xy / reducedVz * uDisplacementScale;
     vec2 deltaTexCoords = P / numLayers;
 
-    // Standard POM ray marching
+    // Step along the displaced surface
     vec2 currentTexCoords = vUv;
-    float currentLayerDepth = 0.0;
-    float layerDepth = 1.0 / numLayers;
-    
-    // March through layers until we find intersection
-    vec2 prevTexCoords = currentTexCoords;
-    float prevLayerDepth = currentLayerDepth;
+    float currentLayerHeight = uDisplacementScale; // Start from max height
+    float currentDepthMapValue = simpleGetTotalSurfaceHeight(currentTexCoords, dx, dy);
+
+    // Step through layers, but adjust step size based on surface slope
+    vec2 prevTexCoords = vUv;
+    float prevLayerHeight = uDisplacementScale;
     
     for(float i = 0.0; i < numLayers; i += 1.0) {
-        float currentDepthMapValue = 1.0 - textureGrad(uDisplacementMap, currentTexCoords, dx, dy).r;
+        if(currentDepthMapValue >= currentLayerHeight) break;
         
-        if(currentLayerDepth > currentDepthMapValue) {
-            break;
-        }
-        
+        // Store previous values for refinement
         prevTexCoords = currentTexCoords;
-        prevLayerDepth = currentLayerDepth;
+        prevLayerHeight = currentLayerHeight;
         
-        currentTexCoords -= deltaTexCoords;
-        currentLayerDepth += layerDepth;
+        // Sample surface height at next position to get surface slope
+        vec2 nextTexCoords = currentTexCoords - deltaTexCoords;
+        float nextDepthMapValue = simpleGetTotalSurfaceHeight(nextTexCoords, dx, dy);
+        
+        // Calculate surface slope and adjust our stepping
+        float surfaceSlope = (nextDepthMapValue - currentDepthMapValue);
+        
+        // Step along the surface contour - adjust layer height based on surface slope
+        float dynamicLayerDepth = (uDisplacementScale / numLayers) * (1.0 + surfaceSlope * 2.0);
+        currentLayerHeight -= dynamicLayerDepth;
+        
+        currentTexCoords = nextTexCoords;
+        currentDepthMapValue = nextDepthMapValue;
     }
 
-    // Binary search refinement
+    // Refined search using binary search (Interval Mapping)
     const int numRefinementSteps = 8;
     for(int i = 0; i < numRefinementSteps; i++) {
         vec2 midTexCoords = mix(currentTexCoords, prevTexCoords, 0.5);
-        float midLayerDepth = mix(currentLayerDepth, prevLayerDepth, 0.5);
-        float midDepthMapValue = 1.0 - textureGrad(uDisplacementMap, midTexCoords, dx, dy).r;
+        float midLayerHeight = mix(currentLayerHeight, prevLayerHeight, 0.5);
+        float midDepthMapValue = simpleGetTotalSurfaceHeight(midTexCoords, dx, dy);
 
-        if (midLayerDepth > midDepthMapValue) {
-            currentTexCoords = midTexCoords;
-            currentLayerDepth = midLayerDepth;
-        } else {
+        if (midDepthMapValue < midLayerHeight) {
             prevTexCoords = midTexCoords;
-            prevLayerDepth = midLayerDepth;
+            prevLayerHeight = midLayerHeight;
+        } else {
+            currentTexCoords = midTexCoords;
+            currentLayerHeight = midLayerHeight;
         }
     }
 
-    // Final linear interpolation
-    float afterDepth = (1.0 - textureGrad(uDisplacementMap, currentTexCoords, dx, dy).r) - currentLayerDepth;
-    float beforeDepth = (1.0 - textureGrad(uDisplacementMap, prevTexCoords, dx, dy).r) - prevLayerDepth;
-    float weight = afterDepth / (afterDepth - beforeDepth + 1e-8);
+    // Final linear interpolation on the highly refined interval
+    float afterDepth = simpleGetTotalSurfaceHeight(currentTexCoords, dx, dy) - currentLayerHeight;
+    float beforeDepth = simpleGetTotalSurfaceHeight(prevTexCoords, dx, dy) - prevLayerHeight;
+    float weight = afterDepth / (afterDepth - beforeDepth);
     vec2 finalTexCoords = mix(currentTexCoords, prevTexCoords, weight);
 
     // Check bounds and set alpha
@@ -295,12 +295,13 @@ void main() {
     vec3 tangentSurfacePos = vec3(parallaxUv, height);
     vec3 tangentLightDir = normalize(transpose(tbnMatrix) * uLightDirection);
     float shadow;
-    if (!uEnableShadows || totalDisplacementScale < 0.001) {
-        // Shadows disabled or no displacement, no self-shadowing
+    if (totalDisplacementScale < 0.001) {
+        // No displacement, no self-shadowing
         shadow = 1.0;
     } else {
         shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
     }
+    // shadow = 1.0;
 
     // Debug mode visualization
     if (uDebugMode > 0) {
@@ -327,8 +328,8 @@ void main() {
             vec2 uvOffset = parallaxUv - vUv;
             debugColor = vec3(uvOffset * 10.0, 0.0); // Scale up offset for visibility
         } else if (uDebugMode == 6) {
-            // Visualize Height Map (inverted for depth)
-            float height = 1.0 - textureGrad(uDisplacementMap, parallaxUv, dx, dy).r;
+            // Visualize Height Map
+            float height = simpleGetTotalSurfaceHeight(parallaxUv, dx, dy) / uDisplacementScale;
             debugColor = vec3(height);
         }
         
