@@ -12,6 +12,7 @@ uniform float uVertexDisplacementScale;
 uniform vec3 uCameraPosition;
 uniform vec3 uLightDirection;
 uniform float uShadowHardness;
+uniform int uDebugMode; // 0=off, 1=tangent, 2=bitangent, 3=normal, 4=view_dir
 
 // Helper function to calculate TBN matrix per fragment
 mat3 getTBNMatrix() {
@@ -19,6 +20,61 @@ mat3 getTBNMatrix() {
     vec3 worldTangent = normalize(vWorldTangent.xyz);
     vec3 worldBitangent = cross(worldNormal, worldTangent) * vWorldTangent.w;
     return mat3(worldTangent, worldBitangent, worldNormal);
+}
+
+// Displacement-aware TBN matrix calculation
+mat3 getDisplacedTBNMatrix(vec2 dx, vec2 dy) {
+    // If no vertex displacement, use original TBN
+    if (uVertexDisplacementScale < 0.001) {
+        return getTBNMatrix();
+    }
+    
+    // Calculate displaced surface normal using screen-space derivatives
+    vec3 dpdx = dFdx(vWorldPosition);
+    vec3 dpdy = dFdy(vWorldPosition);
+    vec2 duvdx = dFdx(vUv);
+    vec2 duvdy = dFdy(vUv);
+    
+    // Sample vertex displacement at neighboring points
+    vec2 texelSize = vec2(1.0) / 1024.0; // Assume texture resolution
+    float h = textureGrad(uVertexDisplacementMap, vUv, dx, dy).r * uVertexDisplacementScale;
+    float dhdu = (textureGrad(uVertexDisplacementMap, vUv + vec2(texelSize.x, 0.0), dx, dy).r - 
+                  textureGrad(uVertexDisplacementMap, vUv - vec2(texelSize.x, 0.0), dx, dy).r) * 0.5 * uVertexDisplacementScale;
+    float dhdv = (textureGrad(uVertexDisplacementMap, vUv + vec2(0.0, texelSize.y), dx, dy).r - 
+                  textureGrad(uVertexDisplacementMap, vUv - vec2(0.0, texelSize.y), dx, dy).r) * 0.5 * uVertexDisplacementScale;
+    
+    // Calculate Jacobian for UV to screen space mapping
+    float jacobian = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+    if (abs(jacobian) < 1e-8) {
+        return getTBNMatrix(); // Fallback to original TBN
+    }
+    
+    // Compute displaced tangent vectors
+    float invJacobian = 1.0 / jacobian;
+    vec2 invJ_row1 = vec2(duvdy.y, -duvdx.y) * invJacobian;
+    vec2 invJ_row2 = vec2(-duvdy.x, duvdx.x) * invJacobian;
+    
+    // Transform position gradients to UV space
+    vec3 dpdu = dpdx * invJ_row1.x + dpdy * invJ_row1.y;
+    vec3 dpdv = dpdx * invJ_row2.x + dpdy * invJ_row2.y;
+    
+    // Add displacement gradients to surface tangents
+    vec3 displacedTangent = dpdu + normalize(vWorldNormal) * dhdu;
+    vec3 displacedBitangent = dpdv + normalize(vWorldNormal) * dhdv;
+    
+    // Compute displaced normal using cross product
+    vec3 displacedNormal = normalize(cross(displacedTangent, displacedBitangent));
+    
+    // Ensure consistent handedness
+    if (dot(displacedNormal, vWorldNormal) < 0.0) {
+        displacedNormal = -displacedNormal;
+    }
+    
+    // Orthogonalize tangent and bitangent
+    displacedTangent = normalize(displacedTangent - dot(displacedTangent, displacedNormal) * displacedNormal);
+    displacedBitangent = cross(displacedNormal, displacedTangent) * vWorldTangent.w;
+    
+    return mat3(displacedTangent, displacedBitangent, displacedNormal);
 }
 
 // Helper function to get total surface height (vertex displacement + detail displacement)
@@ -185,9 +241,12 @@ float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
 
 void main() {
     vec3 worldViewDir = normalize(uCameraPosition - vWorldPosition);
-    vec3 tangentViewDir = normalize(transpose(getTBNMatrix()) * worldViewDir);
     vec2 dx = dFdx(vUv);
     vec2 dy = dFdy(vUv);
+    
+    // Use displacement-aware TBN matrix
+    mat3 tbnMatrix = getDisplacedTBNMatrix(dx, dy);
+    vec3 tangentViewDir = normalize(transpose(tbnMatrix) * worldViewDir);
     
     // Check if we need parallax mapping at all
     float totalDisplacementScale = uVertexDisplacementScale + uDisplacementScale;
@@ -209,12 +268,12 @@ void main() {
     }
 
     vec3 tangentNormal = textureGrad(uNormalMap, parallaxUv, dx, dy).rgb * 2.0 - 1.0;
-    vec3 worldNormal = normalize(getTBNMatrix() * tangentNormal);
+    vec3 worldNormal = normalize(tbnMatrix * tangentNormal);
     vec4 diffuseColor = textureGrad(uDiffuseMap, parallaxUv, dx, dy);
 
     float height = getTotalSurfaceHeight(parallaxUv, dx, dy);
     vec3 tangentSurfacePos = vec3(parallaxUv, height);
-    vec3 tangentLightDir = normalize(transpose(getTBNMatrix()) * uLightDirection);
+    vec3 tangentLightDir = normalize(transpose(tbnMatrix) * uLightDirection);
     float shadow;
     if (totalDisplacementScale < 0.001) {
         // No displacement, no self-shadowing
@@ -223,6 +282,40 @@ void main() {
         shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
     }
     // shadow = 1.0;
+
+    // Debug mode visualization
+    if (uDebugMode > 0) {
+        vec3 debugColor = vec3(0.0);
+        // Use the same displacement-aware TBN matrix for debug visualization
+        vec3 T = tbnMatrix[0]; // Tangent
+        vec3 B = tbnMatrix[1]; // Bitangent  
+        vec3 N = tbnMatrix[2]; // Normal
+        
+        if (uDebugMode == 1) {
+            // Visualize Tangent (Red channel dominant)
+            debugColor = T * 0.5 + 0.5; // Remap from [-1,1] to [0,1]
+        } else if (uDebugMode == 2) {
+            // Visualize Bitangent (Green channel dominant)
+            debugColor = B * 0.5 + 0.5; // Remap from [-1,1] to [0,1]
+        } else if (uDebugMode == 3) {
+            // Visualize Normal (Blue channel dominant)
+            debugColor = N * 0.5 + 0.5; // Remap from [-1,1] to [0,1]
+        } else if (uDebugMode == 4) {
+            // Visualize View Direction in tangent space
+            debugColor = tangentViewDir * 0.5 + 0.5; // Remap from [-1,1] to [0,1]
+        } else if (uDebugMode == 5) {
+            // Visualize Parallax UV offset
+            vec2 uvOffset = parallaxUv - vUv;
+            debugColor = vec3(uvOffset * 10.0, 0.0); // Scale up offset for visibility
+        } else if (uDebugMode == 6) {
+            // Visualize Height Map
+            float height = simpleGetTotalSurfaceHeight(parallaxUv, dx, dy) / uDisplacementScale;
+            debugColor = vec3(height);
+        }
+        
+        gl_FragColor = vec4(debugColor, alpha);
+        return;
+    }
 
     vec3 worldLightDir = normalize(uLightDirection);
     float diff = max(dot(worldNormal, worldLightDir), 0.0);

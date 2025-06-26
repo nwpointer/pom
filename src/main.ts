@@ -55,6 +55,7 @@ const material = new THREE.ShaderMaterial({
         uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
         uCameraPosition: { value: new THREE.Vector3() },
         uShadowHardness: { value: 8.0 },
+        uDebugMode: { value: 0 },
     },
 });
 
@@ -177,6 +178,19 @@ gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name
     denseMaterial.uniforms.uVertexDisplacementScale.value = value;
 });
 gui.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
+
+// Add debug mode control
+const debugModeOptions = {
+    'Normal Rendering': 0,
+    'Tangent Vectors (T)': 1,
+    'Bitangent Vectors (B)': 2,
+    'Normal Vectors (N)': 3,
+    'View Direction': 4,
+    'Parallax UV Offset': 5,
+    'Height Map': 6
+};
+
+gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mode');
 
 // Add camera angle control
 const cameraControl = {
