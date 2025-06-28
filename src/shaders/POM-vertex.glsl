@@ -12,6 +12,48 @@ varying vec3 vSmoothWorldBitangent;
 uniform sampler2D uVertexDisplacementMap;
 uniform float uVertexDisplacementScale;
 uniform float uDisplacementScale;
+uniform bool uUseSmoothTBN;
+
+// Calculate TBN with displacement awareness but no smoothing
+mat3 calculateTBN(vec3 pos, vec3 norm, vec3 tang, float tangentW, vec2 texCoord) {    
+    // If no vertex displacement, return original TBN
+    if (uVertexDisplacementScale < 0.001) {
+        vec3 worldNormal = normalize(mat3(modelMatrix) * norm);
+        vec3 worldTangent = normalize(mat3(modelMatrix) * tang);
+        vec3 worldBitangent = cross(worldNormal, worldTangent) * tangentW;
+        return mat3(worldTangent, worldBitangent, worldNormal);
+    }
+    
+    // Sample displacement at current and neighboring points for gradient calculation
+    float texelSize = 1.0 / 512.0; // Smaller texel size for better gradients
+    
+    float h = texture2D(uVertexDisplacementMap, texCoord).r;
+    float hRight = texture2D(uVertexDisplacementMap, texCoord + vec2(texelSize, 0.0)).r;
+    float hUp = texture2D(uVertexDisplacementMap, texCoord + vec2(0.0, texelSize)).r;
+    
+    // Calculate gradients using forward differences (simpler than central differences)
+    float dhdu = (hRight - h) * uVertexDisplacementScale / texelSize;
+    float dhdv = (hUp - h) * uVertexDisplacementScale / texelSize;
+    
+    // Get original tangent space vectors in object space
+    vec3 T = normalize(tang);
+    vec3 N = normalize(norm);
+    vec3 B = normalize(cross(N, T)) * tangentW;
+    
+    // Calculate perturbed normal based on displacement gradients
+    vec3 perturbedNormal = normalize(N - dhdu * T - dhdv * B);
+    
+    // Recalculate tangent and bitangent to be orthogonal to perturbed normal
+    vec3 newTangent = normalize(T - dot(T, perturbedNormal) * perturbedNormal);
+    vec3 newBitangent = cross(perturbedNormal, newTangent) * tangentW;
+    
+    // Transform to world space
+    vec3 worldT = normalize(mat3(modelMatrix) * newTangent);
+    vec3 worldB = normalize(mat3(modelMatrix) * newBitangent);
+    vec3 worldN = normalize(mat3(modelMatrix) * perturbedNormal);
+    
+    return mat3(worldT, worldB, worldN);
+}
 
 // Calculate smooth TBN by sampling neighboring points and interpolating
 mat3 calculateSmoothTBN(vec3 pos, vec3 norm, vec3 tang, float tangentW, vec2 texCoord) {
@@ -83,11 +125,16 @@ void main() {
     vWorldNormal = normalize(mat3(modelMatrix) * normal);
     vWorldTangent = vec4(normalize(mat3(modelMatrix) * tangent.xyz), tangent.w);
 
-    // Calculate smooth interpolated TBN that accounts for displacement
-    mat3 smoothTBN = calculateSmoothTBN(position, normal, tangent.xyz, tangent.w, uv);
-    vSmoothWorldNormal = smoothTBN[2];
-    vSmoothWorldTangent = smoothTBN[0];
-    vSmoothWorldBitangent = smoothTBN[1];
+    // Calculate TBN based on user preference (smooth vs regular)
+    mat3 activeTBN;
+    if (uUseSmoothTBN) {
+        activeTBN = calculateSmoothTBN(position, normal, tangent.xyz, tangent.w, uv);
+    } else {
+        activeTBN = calculateTBN(position, normal, tangent.xyz, tangent.w, uv);
+    }
+    vSmoothWorldNormal = activeTBN[2];
+    vSmoothWorldTangent = activeTBN[0];
+    vSmoothWorldBitangent = activeTBN[1];
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
 } 

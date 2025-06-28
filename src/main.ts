@@ -1,15 +1,244 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import GUI from 'lil-gui';
-import vertexShader from './shaders/vertex.glsl?raw';
-import fragmentShader from './shaders/fragment.glsl?raw';
-import vertexShaderDense from './shaders/vertex-dense.glsl?raw';
-import fragmentShaderDense from './shaders/fragment-dense.glsl?raw';
+import vertexShader from './shaders/POM-vertex.glsl?raw';
+import fragmentShader from './shaders/POM-fragment.glsl?raw';
+import vertexShaderDense from './shaders/standard-vertex.glsl?raw';
+import fragmentShaderDense from './shaders/standard-fragment.glsl?raw';
+
+// Performance monitoring class
+class PerformanceMonitor {
+    private frames: number = 0;
+    private lastTime: number = 0;
+    private fps: number = 0;
+    private frameTime: number = 0;
+    private minFps: number = Infinity;
+    private maxFps: number = 0;
+    private fpsHistory: number[] = [];
+    private frameTimeHistory: number[] = [];
+    private historyLength: number = 60; // Keep 60 samples
+    private updateInterval: number = 100; // Update display every 100ms
+    private lastUpdate: number = 0;
+    private container!: HTMLElement;
+    private gpuPanel?: HTMLElement;
+
+    constructor() {
+        this.createUI();
+        this.lastTime = performance.now();
+    }
+
+    private createUI(): void {
+        // Create performance overlay
+        this.container = document.createElement('div');
+        this.container.style.cssText = `
+            position: fixed;
+            top: 200px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            z-index: 1000;
+            min-width: 200px;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(0, 255, 0, 0.3);
+        `;
+        document.body.appendChild(this.container);
+
+        // Check if GPU timing extension is available
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        if (gl) {
+            const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2') || 
+                       gl.getExtension('EXT_disjoint_timer_query');
+            if (ext) {
+                this.gpuPanel = document.createElement('div');
+                this.gpuPanel.style.marginTop = '5px';
+                this.gpuPanel.style.paddingTop = '5px';
+                this.gpuPanel.style.borderTop = '1px solid rgba(0, 255, 0, 0.3)';
+                this.container.appendChild(this.gpuPanel);
+            }
+        }
+    }
+
+    update(): void {
+        const now = performance.now();
+        this.frameTime = now - this.lastTime;
+        this.frames++;
+
+        // Update FPS calculation
+        if (now - this.lastUpdate >= this.updateInterval) {
+            this.fps = Math.round((this.frames * 1000) / (now - this.lastUpdate));
+            
+            // Update min/max FPS
+            if (this.fps > 0) {
+                this.minFps = Math.min(this.minFps, this.fps);
+                this.maxFps = Math.max(this.maxFps, this.fps);
+            }
+
+            // Update history
+            this.fpsHistory.push(this.fps);
+            this.frameTimeHistory.push(this.frameTime);
+            
+            if (this.fpsHistory.length > this.historyLength) {
+                this.fpsHistory.shift();
+                this.frameTimeHistory.shift();
+            }
+
+            this.updateDisplay();
+            this.frames = 0;
+            this.lastUpdate = now;
+        }
+
+        this.lastTime = now;
+    }
+
+    private updateDisplay(): void {
+        const avgFps = this.fpsHistory.length > 0 ? 
+            Math.round(this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length) : 0;
+        const avgFrameTime = this.frameTimeHistory.length > 0 ?
+            (this.frameTimeHistory.reduce((a, b) => a + b, 0) / this.frameTimeHistory.length).toFixed(2) : '0.00';
+
+        // Get memory info if available
+        let memoryInfo = '';
+        if ('memory' in performance && (performance as any).memory) {
+            const memory = (performance as any).memory;
+            const usedMB = Math.round(memory.usedJSHeapSize / 1048576);
+            const totalMB = Math.round(memory.totalJSHeapSize / 1048576);
+            const limitMB = Math.round(memory.jsHeapSizeLimit / 1048576);
+            memoryInfo = `
+                <div style="margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(0, 255, 0, 0.3);">
+                    <div><strong>Memory:</strong></div>
+                    <div>Used: ${usedMB} MB</div>
+                    <div>Total: ${totalMB} MB</div>
+                    <div>Limit: ${limitMB} MB</div>
+                </div>
+            `;
+        }
+
+        // Get GPU info if available
+        let gpuInfo = '';
+        if (this.gpuPanel) {
+            gpuInfo = `
+                <div><strong>GPU:</strong></div>
+                <div>Timer queries supported</div>
+            `;
+        }
+
+        this.container.innerHTML = `
+            <div><strong>Performance Monitor</strong></div>
+            <div style="margin-top: 5px;">
+                <div>FPS: <span style="color: ${this.getFpsColor(this.fps)}">${this.fps}</span></div>
+                <div>Avg FPS: ${avgFps}</div>
+                <div>Min: ${this.minFps === Infinity ? 0 : this.minFps} / Max: ${this.maxFps}</div>
+                <div>Frame Time: ${this.frameTime.toFixed(2)}ms</div>
+                <div>Avg Frame Time: ${avgFrameTime}ms</div>
+            </div>
+            ${memoryInfo}
+            ${this.gpuPanel ? gpuInfo : ''}
+        `;
+
+        if (this.gpuPanel && gpuInfo) {
+            this.gpuPanel.innerHTML = gpuInfo;
+        }
+    }
+
+    private getFpsColor(fps: number): string {
+        if (fps >= 60) return '#00ff00'; // Green
+        if (fps >= 30) return '#ffff00'; // Yellow
+        if (fps >= 15) return '#ff8800'; // Orange
+        return '#ff0000'; // Red
+    }
+
+    reset(): void {
+        this.frames = 0;
+        this.minFps = Infinity;
+        this.maxFps = 0;
+        this.fpsHistory = [];
+        this.frameTimeHistory = [];
+        this.lastTime = performance.now();
+        this.lastUpdate = this.lastTime;
+    }
+
+    setVisible(visible: boolean): void {
+        this.container.style.display = visible ? 'block' : 'none';
+    }
+
+    destroy(): void {
+        if (this.container && this.container.parentNode) {
+            this.container.parentNode.removeChild(this.container);
+        }
+    }
+}
+
+// Rendering statistics tracker
+class RenderStats {
+    private info!: HTMLElement;
+    
+    constructor() {
+        this.createUI();
+    }
+
+    private createUI(): void {
+        this.info = document.createElement('div');
+        this.info.style.cssText = `
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00aaff;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(0, 170, 255, 0.3);
+        `;
+        document.body.appendChild(this.info);
+    }
+
+    update(renderer: THREE.WebGLRenderer): void {
+        const info = renderer.info;
+        
+        this.info.innerHTML = `
+            <div><strong>Render Statistics</strong></div>
+            <div style="margin-top: 5px;">
+                <div>Geometry: ${info.memory.geometries}</div>
+                <div>Textures: ${info.memory.textures}</div>
+                <div>Draw Calls: ${info.render.calls}</div>
+                <div>Triangles: ${info.render.triangles.toLocaleString()}</div>
+                <div>Points: ${info.render.points.toLocaleString()}</div>
+                <div>Lines: ${info.render.lines.toLocaleString()}</div>
+                <div>Programs: ${info.programs?.length || 0}</div>
+            </div>
+        `;
+    }
+
+    setVisible(visible: boolean): void {
+        this.info.style.display = visible ? 'block' : 'none';
+    }
+
+    destroy(): void {
+        if (this.info && this.info.parentNode) {
+            this.info.parentNode.removeChild(this.info);
+        }
+    }
+}
 
 // Initial displacement values
-// const INITIAL_DISPLACEMENT_SCALE = 0.05;
-const INITIAL_DISPLACEMENT_SCALE = 0.005;
+const INITIAL_DISPLACEMENT_SCALE = 0.075;
 const INITIAL_VERTEX_DISPLACEMENT_SCALE = 0.2;
+
+// Initialize performance monitoring (hidden by default)
+const performanceMonitor = new PerformanceMonitor();
+const renderStats = new RenderStats();
+
+// Hide performance monitors by default
+performanceMonitor.setVisible(false);
+renderStats.setVisible(false);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.001, 100);
@@ -20,8 +249,8 @@ document.body.appendChild(renderer.domElement);
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
 // Set initial camera angle to 45 degrees
-const initialAngle = 90; // degrees
-const radius = 2;
+const initialAngle = 45; // degrees
+const radius = 0.5; // Zoomed in closer
 camera.position.y = Math.sin(-initialAngle * Math.PI / 180) * radius;
 camera.position.z = Math.cos(-initialAngle * Math.PI / 180) * radius;
 camera.position.x = 0.0;
@@ -58,27 +287,26 @@ const material = new THREE.ShaderMaterial({
         uDisplacementMap: { value: displacementMap },
         uVertexDisplacementMap: { value: vertexDisplacementMap },
         uDisplacementScale: { value: INITIAL_DISPLACEMENT_SCALE },
-        uDisplacementBias: { value: -0.025 },
         uVertexDisplacementScale: { value: INITIAL_VERTEX_DISPLACEMENT_SCALE },
         uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
         uCameraPosition: { value: new THREE.Vector3() },
         uShadowHardness: { value: 8.0 },
         uDebugMode: { value: 0 },
-        uUseSmoothTBN: { value: true },
-        uEnableShadows: { value: false },
+        uEnableShadows: { value: true },
         uUseDynamicLayers: { value: false },
         uPOMMethod: { value: 0 },
         uTextureRepeat: { value: 10.0 },
+        uUseSmoothTBN: { value: false },
     },
 });
 
 const plane = new THREE.Mesh(geometry, material);
-// Position the POM mesh to the left
-plane.position.x = -0.5;
+// Center the POM mesh
+plane.position.x = 0;
 scene.add(plane);
 
-// Create dense mesh for comparison
-const denseGeometry = new THREE.PlaneGeometry(1, 1, 512, 512); // Much denser geometry
+// Create standard mesh for comparison (initially hidden)
+const denseGeometry = new THREE.PlaneGeometry(1, 1, 512, 512); // High-density geometry
 denseGeometry.computeTangents();
 
 const denseMaterial = new THREE.ShaderMaterial({
@@ -98,111 +326,72 @@ const denseMaterial = new THREE.ShaderMaterial({
 });
 
 const densePlane = new THREE.Mesh(denseGeometry, denseMaterial);
-// Position the dense mesh to the right
-densePlane.position.x = 0.5;
+// Center the standard mesh and initially hide it
+densePlane.position.x = 0;
+densePlane.visible = false;
 scene.add(densePlane);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
 const gui = new GUI();
-const textureLoader = new THREE.TextureLoader();
 
-const textureUpload = {
-    diffuse: () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.onchange = (e) => {
-            const file = (e.target as HTMLInputElement).files?.[0];
-            if (file) {
-                const url = URL.createObjectURL(file);
-                const texture = textureLoader.load(url, (texture) => {
-                    texture.anisotropy = maxAnisotropy;
-                    texture.wrapS = THREE.RepeatWrapping;
-                    texture.wrapT = THREE.RepeatWrapping;
-                    texture.needsUpdate = true;
-                });
-                material.uniforms.uDiffuseMap.value = texture;
-                denseMaterial.uniforms.uDiffuseMap.value = texture;
-            }
-        };
-        input.click();
-    },
-    normal: () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.onchange = (e) => {
-            const file = (e.target as HTMLInputElement).files?.[0];
-            if (file) {
-                const url = URL.createObjectURL(file);
-                const texture = textureLoader.load(url, (texture) => {
-                    texture.anisotropy = maxAnisotropy;
-                    texture.wrapS = THREE.RepeatWrapping;
-                    texture.wrapT = THREE.RepeatWrapping;
-                    texture.needsUpdate = true;
-                });
-                material.uniforms.uNormalMap.value = texture;
-                denseMaterial.uniforms.uNormalMap.value = texture;
-            }
-        };
-        input.click();
-    },
-    displacement: () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.onchange = (e) => {
-            const file = (e.target as HTMLInputElement).files?.[0];
-            if (file) {
-                const url = URL.createObjectURL(file);
-                const texture = textureLoader.load(url, (texture) => {
-                    texture.anisotropy = maxAnisotropy;
-                    texture.wrapS = THREE.RepeatWrapping;
-                    texture.wrapT = THREE.RepeatWrapping;
-                    texture.needsUpdate = true;
-                });
-                material.uniforms.uDisplacementMap.value = texture;
-                denseMaterial.uniforms.uDisplacementMap.value = texture;
-            }
-        };
-        input.click();
-    },
-    vertexDisplacement: () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.onchange = (e) => {
-            const file = (e.target as HTMLInputElement).files?.[0];
-            if (file) {
-                const url = URL.createObjectURL(file);
-                const texture = textureLoader.load(url, (texture) => {
-                    texture.anisotropy = maxAnisotropy;
-                    texture.wrapS = THREE.RepeatWrapping;
-                    texture.wrapT = THREE.RepeatWrapping;
-                    texture.needsUpdate = true;
-                });
-                material.uniforms.uVertexDisplacementMap.value = texture;
-                denseMaterial.uniforms.uVertexDisplacementMap.value = texture;
-            }
-        };
-        input.click();
-    }
+// Display mode control
+const displayControl = {
+    mode: 'Custom Shader'
 };
 
-gui.add(textureUpload, 'diffuse').name('Upload Diffuse');
-gui.add(textureUpload, 'normal').name('Upload Normal');
-gui.add(textureUpload, 'displacement').name('Upload Parallax');
-gui.add(textureUpload, 'vertexDisplacement').name('Upload Displacement');
+const displayModeOptions = {
+    'Custom Shader': 'Custom Shader',
+    'Standard Mesh': 'Standard Mesh'
+};
 
-gui.add(material.uniforms.uDisplacementScale, 'value', 0, 0.2, 0.001).name('Parallax Scale').onChange((value: number) => {
-    denseMaterial.uniforms.uDisplacementScale.value = value;
+gui.add(displayControl, 'mode', displayModeOptions).name('Display Mode').onChange((value: string) => {
+    if (value === 'Custom Shader') {
+        plane.visible = true;
+        densePlane.visible = false;
+    } else if (value === 'Standard Mesh') {
+        plane.visible = false;
+        densePlane.visible = true;
+    }
 });
-gui.add(material.uniforms.uDisplacementBias, 'value', -0.1, 0.1, 0.001).name('Parallax Bias');
+
+// Helper function to get currently active material
+function getActiveMaterial(): THREE.ShaderMaterial {
+    return plane.visible ? material : denseMaterial;
+}
+
+// Helper function to sync uniforms to both materials
+function syncUniformToBoth(uniformName: string, value: any): void {
+    material.uniforms[uniformName].value = value;
+    denseMaterial.uniforms[uniformName].value = value;
+}
+
+// Store the raw GUI values
+let rawParallaxScale = INITIAL_DISPLACEMENT_SCALE;
+let textureRepeat = 10.0;
+
+// Helper function to update parallax scale with texture repeat compensation
+function updateParallaxScale(): void {
+    const adjustedScale = rawParallaxScale / textureRepeat;
+    syncUniformToBoth('uDisplacementScale', adjustedScale);
+}
+
+// Set initial adjusted parallax scale
+updateParallaxScale();
+
+gui.add({ value: rawParallaxScale }, 'value', 0, 0.2, 0.001).name('Parallax Scale').onChange((value: number) => {
+    rawParallaxScale = value;
+    updateParallaxScale();
+});
 gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name('Displacement Scale').onChange((value: number) => {
-    denseMaterial.uniforms.uVertexDisplacementScale.value = value;
+    syncUniformToBoth('uVertexDisplacementScale', value);
 });
-gui.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
-gui.add(material.uniforms.uEnableShadows, 'value').name('Enable Shadows');
-gui.add(material.uniforms.uTextureRepeat, 'value', 1.0, 50.0, 0.1).name('Texture Repeat').onChange((value: number) => {
-    denseMaterial.uniforms.uTextureRepeat.value = value;
+
+gui.add({ value: textureRepeat }, 'value', 1.0, 50.0, 0.1).name('Texture Repeat').onChange((value: number) => {
+    textureRepeat = value;
+    syncUniformToBoth('uTextureRepeat', value);
+    updateParallaxScale(); // Update parallax scale when texture repeat changes
 });
 
 // Add debug mode control
@@ -216,10 +405,7 @@ const debugModeOptions = {
     'Height Map': 6
 };
 
-gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mode');
 
-// Add TBN calculation method control
-gui.add(material.uniforms.uUseSmoothTBN, 'value').name('Smooth TBN (vs Physically Accurate)');
 
 // Add dynamic layers control
 gui.add(material.uniforms.uUseDynamicLayers, 'value').name('Dynamic Layers (vs Fixed)');
@@ -227,7 +413,7 @@ gui.add(material.uniforms.uUseDynamicLayers, 'value').name('Dynamic Layers (vs F
 // Add POM method selection
 const pomMethodOptions = {
     'Standard POM': 0,
-    'Simple POM': 1,
+    'Terrain POM': 1,
     'Full POM': 2
 };
 gui.add(material.uniforms.uPOMMethod, 'value', pomMethodOptions).name('POM Method');
@@ -245,10 +431,6 @@ function updateCameraPosition(angle: number) {
     camera.lookAt(0, 0, 0);
 }
 
-gui.add(cameraControl, 'angle', 0, 360, 1).name('Camera Angle (°)').onChange((value: number) => {
-    updateCameraPosition(value);
-});
-
 // Add wireframe toggle
 const wireframeControl = {
     wireframe: false
@@ -258,13 +440,46 @@ gui.add(wireframeControl, 'wireframe').name('Wireframe').onChange((value: boolea
     denseMaterial.wireframe = value;
 });
 
-const lightFolder = gui.addFolder('Light Direction');
-lightFolder.add(material.uniforms.uLightDirection.value, 'x', -1, 1, 0.01).name('X').onChange((value: number) => {
+gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mode');
+
+const lightFolder = gui.addFolder('Lighting');
+lightFolder.close(); // Close folder by default
+lightFolder.add(cameraControl, 'angle', -90, 90, 1).name('Camera Angle (°)').onChange((value: number) => {
+    updateCameraPosition(value);
+});
+lightFolder.add(material.uniforms.uLightDirection.value, 'x', -1, 1, 0.01).name('Light Direction X').onChange((value: number) => {
+    material.uniforms.uLightDirection.value.x = value;
     denseMaterial.uniforms.uLightDirection.value.x = value;
 });
-lightFolder.add(material.uniforms.uLightDirection.value, 'y', -1, 1, 0.01).name('Y').onChange((value: number) => {
+lightFolder.add(material.uniforms.uLightDirection.value, 'y', -1, 1, 0.01).name('Light Direction Y').onChange((value: number) => {
+    material.uniforms.uLightDirection.value.y = value;
     denseMaterial.uniforms.uLightDirection.value.y = value;
 });
+lightFolder.add(material.uniforms.uEnableShadows, 'value').name('Enable Shadows');
+lightFolder.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
+lightFolder.add(material.uniforms.uUseSmoothTBN, 'value').name('Use Smooth TBN');
+
+// Performance monitoring controls
+const perfFolder = gui.addFolder('Performance Monitor');
+perfFolder.close(); // Close folder by default
+const perfControls = {
+    showFpsMonitor: false,
+    showRenderStats: false,
+    resetStats: () => {
+        performanceMonitor.reset();
+        console.log('Performance statistics reset');
+    }
+};
+
+perfFolder.add(perfControls, 'showFpsMonitor').name('Show FPS Monitor').onChange((value: boolean) => {
+    performanceMonitor.setVisible(value);
+});
+
+perfFolder.add(perfControls, 'showRenderStats').name('Show Render Stats').onChange((value: boolean) => {
+    renderStats.setVisible(value);
+});
+
+perfFolder.add(perfControls, 'resetStats').name('Reset Statistics');
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -274,9 +489,20 @@ window.addEventListener('resize', () => {
 
 function animate() {
     requestAnimationFrame(animate);
+    
+    // Update performance monitoring
+    performanceMonitor.update();
+    renderStats.update(renderer);
+    
     controls.update();
-    material.uniforms.uCameraPosition.value.copy(camera.position);
-    denseMaterial.uniforms.uCameraPosition.value.copy(camera.position);
+    
+    // Only update camera position for the currently visible mesh (performance optimization)
+    if (plane.visible) {
+        material.uniforms.uCameraPosition.value.copy(camera.position);
+    } else {
+        denseMaterial.uniforms.uCameraPosition.value.copy(camera.position);
+    }
+    
     renderer.render(scene, camera);
 }
 

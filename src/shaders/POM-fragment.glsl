@@ -17,88 +17,20 @@ uniform vec3 uCameraPosition;
 uniform vec3 uLightDirection;
 uniform float uShadowHardness;
 uniform int uDebugMode; // 0=off, 1=tangent, 2=bitangent, 3=normal, 4=view_dir
-uniform bool uUseSmoothTBN; // true=smooth interpolated, false=physically accurate
+
 uniform bool uEnableShadows; // true=shadows enabled, false=shadows disabled
 uniform bool uUseDynamicLayers; // true=dynamic layers based on view angle, false=fixed layers
-uniform int uPOMMethod; // 0=standard, 1=simple, 2=full
+uniform int uPOMMethod; // 0=standard, 1=terrain, 2=full
 uniform float uTextureRepeat; // Number of times to repeat the parallax textures
 
-// Helper function to calculate TBN matrix per fragment
-mat3 getTBNMatrix() {
-    vec3 worldNormal = normalize(vWorldNormal);
-    vec3 worldTangent = normalize(vWorldTangent.xyz);
-    vec3 worldBitangent = cross(worldNormal, worldTangent) * vWorldTangent.w;
-    return mat3(worldTangent, worldBitangent, worldNormal);
-}
 
-// Displacement-aware TBN matrix calculation
-mat3 getDisplacedTBNMatrix(vec2 dx, vec2 dy) {
-    // If no vertex displacement, use original TBN
-    if (uVertexDisplacementScale < 0.001) {
-        return getTBNMatrix();
-    }
-    
-    // Calculate displaced surface normal using screen-space derivatives
-    vec3 dpdx = dFdx(vWorldPosition);
-    vec3 dpdy = dFdy(vWorldPosition);
-    vec2 duvdx = dFdx(vUv);
-    vec2 duvdy = dFdy(vUv);
-    
-    // Sample vertex displacement at neighboring points
-    vec2 texelSize = vec2(1.0) / 1024.0; // Assume texture resolution
-    float h = textureGrad(uVertexDisplacementMap, vUv, dx, dy).r * uVertexDisplacementScale;
-    float dhdu = (textureGrad(uVertexDisplacementMap, vUv + vec2(texelSize.x, 0.0), dx, dy).r - 
-                  textureGrad(uVertexDisplacementMap, vUv - vec2(texelSize.x, 0.0), dx, dy).r) * 0.5 * uVertexDisplacementScale;
-    float dhdv = (textureGrad(uVertexDisplacementMap, vUv + vec2(0.0, texelSize.y), dx, dy).r - 
-                  textureGrad(uVertexDisplacementMap, vUv - vec2(0.0, texelSize.y), dx, dy).r) * 0.5 * uVertexDisplacementScale;
-    
-    // Calculate Jacobian for UV to screen space mapping
-    float jacobian = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-    if (abs(jacobian) < 1e-8) {
-        return getTBNMatrix(); // Fallback to original TBN
-    }
-    
-    // Compute displaced tangent vectors
-    float invJacobian = 1.0 / jacobian;
-    vec2 invJ_row1 = vec2(duvdy.y, -duvdx.y) * invJacobian;
-    vec2 invJ_row2 = vec2(-duvdy.x, duvdx.x) * invJacobian;
-    
-    // Transform position gradients to UV space
-    vec3 dpdu = dpdx * invJ_row1.x + dpdy * invJ_row1.y;
-    vec3 dpdv = dpdx * invJ_row2.x + dpdy * invJ_row2.y;
-    
-    // Add displacement gradients to surface tangents
-    vec3 displacedTangent = dpdu + normalize(vWorldNormal) * dhdu;
-    vec3 displacedBitangent = dpdv + normalize(vWorldNormal) * dhdv;
-    
-    // Compute displaced normal using cross product
-    vec3 displacedNormal = normalize(cross(displacedTangent, displacedBitangent));
-    
-    // Ensure consistent handedness
-    if (dot(displacedNormal, vWorldNormal) < 0.0) {
-        displacedNormal = -displacedNormal;
-    }
-    
-    // Orthogonalize tangent and bitangent
-    displacedTangent = normalize(displacedTangent - dot(displacedTangent, displacedNormal) * displacedNormal);
-    displacedBitangent = cross(displacedNormal, displacedTangent) * vWorldTangent.w;
-    
-    return mat3(displacedTangent, displacedBitangent, displacedNormal);
-}
-
-// Get TBN matrix based on user preference
+// Get TBN matrix - always use smooth interpolated TBN from vertex shader
 mat3 getActiveTBNMatrix(vec2 dx, vec2 dy) {
-    if (uUseSmoothTBN) {
-        // Use smooth interpolated TBN from vertex shader
-        return mat3(
-            normalize(vSmoothWorldTangent),
-            normalize(vSmoothWorldBitangent),
-            normalize(vSmoothWorldNormal)
-        );
-    } else {
-        // Use physically accurate displaced TBN
-        return getDisplacedTBNMatrix(dx, dy);
-    }
+    return mat3(
+        normalize(vSmoothWorldTangent),
+        normalize(vSmoothWorldBitangent),
+        normalize(vSmoothWorldNormal)
+    );
 }
 
 // Helper function to get total surface height (vertex displacement + detail displacement)
@@ -114,7 +46,7 @@ float getTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
 }
 
 // Helper function to get displacement height from 0 to uDisplacementScale
-float simpleGetTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
+float terrainGetTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
     vec2 repeatedCoords = texCoords * uTextureRepeat;
     vec2 repeatedDx = dx * uTextureRepeat;
     vec2 repeatedDy = dy * uTextureRepeat;
@@ -207,13 +139,13 @@ vec3 standardParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     return vec3(finalTexCoords, alpha);
 }
 
-vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
+vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     // Determine number of layers - dynamic or fixed
     float numLayers;
     if (uUseDynamicLayers) {
         // Dynamic layers based on view angle for performance
         const float minLayers = 16.0;
-        const float maxLayers = 64.0; // Lower max for simple version
+        const float maxLayers = 64.0; // Lower max for terrain version
         numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), V)));
     } else {
         // Fixed number of layers
@@ -230,7 +162,7 @@ vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     // Step along the displaced surface
     vec2 currentTexCoords = vUv;
     float currentLayerHeight = uDisplacementScale; // Start from max height
-    float currentDepthMapValue = simpleGetTotalSurfaceHeight(currentTexCoords, dx, dy);
+    float currentDepthMapValue = terrainGetTotalSurfaceHeight(currentTexCoords, dx, dy);
 
     // Step through layers, but adjust step size based on surface slope
     vec2 prevTexCoords = vUv;
@@ -245,7 +177,7 @@ vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
         
         // Sample surface height at next position to get surface slope
         vec2 nextTexCoords = currentTexCoords - deltaTexCoords;
-        float nextDepthMapValue = simpleGetTotalSurfaceHeight(nextTexCoords, dx, dy);
+        float nextDepthMapValue = terrainGetTotalSurfaceHeight(nextTexCoords, dx, dy);
         
         // Calculate surface slope and adjust our stepping
         float surfaceSlope = (nextDepthMapValue - currentDepthMapValue);
@@ -263,7 +195,7 @@ vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     for(int i = 0; i < numRefinementSteps; i++) {
         vec2 midTexCoords = mix(currentTexCoords, prevTexCoords, 0.5);
         float midLayerHeight = mix(currentLayerHeight, prevLayerHeight, 0.5);
-        float midDepthMapValue = simpleGetTotalSurfaceHeight(midTexCoords, dx, dy);
+        float midDepthMapValue = terrainGetTotalSurfaceHeight(midTexCoords, dx, dy);
 
         if (midDepthMapValue < midLayerHeight) {
             prevTexCoords = midTexCoords;
@@ -275,8 +207,8 @@ vec3 simpleParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     }
 
     // Final linear interpolation on the highly refined interval
-    float afterDepth = simpleGetTotalSurfaceHeight(currentTexCoords, dx, dy) - currentLayerHeight;
-    float beforeDepth = simpleGetTotalSurfaceHeight(prevTexCoords, dx, dy) - prevLayerHeight;
+    float afterDepth = terrainGetTotalSurfaceHeight(currentTexCoords, dx, dy) - currentLayerHeight;
+    float beforeDepth = terrainGetTotalSurfaceHeight(prevTexCoords, dx, dy) - prevLayerHeight;
     float weight = afterDepth / (afterDepth - beforeDepth);
     vec2 finalTexCoords = mix(currentTexCoords, prevTexCoords, weight);
 
@@ -388,12 +320,11 @@ void main() {
     vec3 tangentViewDir = normalize(transpose(tbnMatrix) * worldViewDir);
     
     // Check if we need parallax mapping at all
-    float totalDisplacementScale = uVertexDisplacementScale + uDisplacementScale;
     vec2 parallaxUv;
     float alpha = 1.0;
     
-    if (totalDisplacementScale < 0.001) {
-        // No displacement, use original UVs
+    if (uDisplacementScale < 0.001) {
+        // No parallax displacement, use original UVs (skip POM calculation)
         parallaxUv = vUv;
     } else {
         // Apply selected parallax occlusion mapping method
@@ -402,8 +333,8 @@ void main() {
             // Standard POM - simplest implementation
             pomResult = standardParallaxOcclusionMap(tangentViewDir, dx, dy);
         } else if (uPOMMethod == 1) {
-            // Simple POM - with surface slope adjustments
-            pomResult = simpleParallaxOcclusionMap(tangentViewDir, dx, dy);
+            // Terrain POM - with surface slope adjustments
+            pomResult = terrainParallaxOcclusionMap(tangentViewDir, dx, dy);
         } else {
             // Full POM - with binary search refinement
             pomResult = parallaxOcclusionMap(tangentViewDir, dx, dy);
@@ -429,8 +360,8 @@ void main() {
     vec3 tangentSurfacePos = vec3(parallaxUv, height);
     vec3 tangentLightDir = normalize(transpose(tbnMatrix) * uLightDirection);
     float shadow;
-    if (!uEnableShadows || totalDisplacementScale < 0.001) {
-        // Shadows disabled or no displacement, no self-shadowing
+    if (!uEnableShadows || uDisplacementScale < 0.001) {
+        // Shadows disabled or no parallax displacement, no self-shadowing
         shadow = 1.0;
     } else {
         shadow = getShadow(tangentSurfacePos, tangentLightDir, dx, dy);
@@ -462,7 +393,7 @@ void main() {
             debugColor = vec3(uvOffset * 10.0, 0.0); // Scale up offset for visibility
         } else if (uDebugMode == 6) {
             // Visualize Height Map
-            float height = simpleGetTotalSurfaceHeight(parallaxUv, dx, dy) / uDisplacementScale;
+            float height = terrainGetTotalSurfaceHeight(parallaxUv, dx, dy) / uDisplacementScale;
             debugColor = vec3(height);
         }
         
