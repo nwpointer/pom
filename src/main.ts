@@ -666,9 +666,9 @@ function animate() {
     
     // Only update camera position for the currently visible mesh (performance optimization)
     if (plane.visible) {
-        material.uniforms.uCameraPosition.value.copy(camera.position);
+    material.uniforms.uCameraPosition.value.copy(camera.position);
     } else {
-        denseMaterial.uniforms.uCameraPosition.value.copy(camera.position);
+    denseMaterial.uniforms.uCameraPosition.value.copy(camera.position);
     }
     
     renderer.render(scene, camera);

@@ -201,6 +201,7 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
 
 float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
     if (tangentLightDir.z <= 0.0) return 0.0;
+    
     float shadow = 0.0;
     const int numSamples = 32;
     float rayStep = 1.0 / float(numSamples);
@@ -213,7 +214,8 @@ float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
     vec2 repeatedDy = dy * uTextureRepeat;
     
     for (int i = 0; i < numSamples; i++) {
-        if (currentRayHeight > 1.0 || currentTexCoords.x < -0.5 || currentTexCoords.x > 1.5 || currentTexCoords.y < -0.5 || currentTexCoords.y > 1.5) break;
+        if (currentRayHeight > 1.0 || currentTexCoords.x < -0.5 || currentTexCoords.x > 1.5 || 
+            currentTexCoords.y < -0.5 || currentTexCoords.y > 1.5) break;
         
         // Sample height using repeated coordinates
         vec2 repeatedTexCoords = currentTexCoords * uTextureRepeat;
@@ -222,9 +224,11 @@ float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
         if (currentRayHeight < heightAtSample) {
             shadow += 1.0;
         }
+        
         currentRayHeight += rayStep;
         currentTexCoords += texStep;
     }
+    
     return 1.0 - min(shadow / uShadowHardness, 1.0);
 }
 
@@ -271,10 +275,35 @@ void main() {
     vec4 diffuseColor = textureGrad(uDiffuseMap, repeatedParallaxUv, repeatedDx, repeatedDy);
 
     // Calculate surface position in tangent space for shadows using repeated coordinates
-    float height = textureGrad(uDisplacementMap, repeatedParallaxUv, repeatedDx, repeatedDy).r;
+    float height = textureGrad(uDisplacementMap, repeatedParallaxUv, repeatedDx, repeatedDy).r + uParallaxOffset;
     vec3 tangentSurfacePos = vec3(parallaxUv, height);
-    vec3 tangentLightDir = normalize(transpose(tbnMatrix) * uLightDirection);
+    
+    // Ensure light source is always above the maximum possible surface height
+    // Maximum possible height is 1.0 (texture value) + uParallaxOffset
+    float maxSurfaceHeight = 1.0 + uParallaxOffset;
+    
+    // Calculate the minimum light Z to ensure it's above max surface height
+    // Add extra margin (0.5) to ensure robust shadow calculation
+    float minLightZ = maxSurfaceHeight + 0.5;
+    
+    // Get world light direction and ensure it has sufficient upward component
+    vec3 worldLightDir = normalize(uLightDirection);
+    
+    // If the light Z is too low, boost it to ensure proper tangent space transformation
+    if (worldLightDir.z < minLightZ) {
+        worldLightDir = normalize(vec3(worldLightDir.xy, minLightZ));
+    }
+    
+    vec3 tangentLightDir = normalize(transpose(tbnMatrix) * worldLightDir);
+    
+    // Additional safety: ensure tangent space light Z is always positive with minimum threshold
+    float minTangentLightZ = 0.2; // Minimum threshold for stable shadow calculations
+    if (tangentLightDir.z < minTangentLightZ) {
+        tangentLightDir = normalize(vec3(tangentLightDir.xy, minTangentLightZ));
+    }
+    
     float shadow;
+    
     if (!uEnableShadows || uDisplacementScale < 0.001) {
         // Shadows disabled or no parallax displacement, no self-shadowing
         shadow = 1.0;
@@ -316,7 +345,6 @@ void main() {
         return;
     }
 
-    vec3 worldLightDir = normalize(uLightDirection);
     float diff = max(dot(worldNormal, worldLightDir), 0.0);
     vec3 ambient = vec3(0.1);
     vec3 lighting = (ambient * shadow) + (diffuseColor.rgb * diff * shadow);
