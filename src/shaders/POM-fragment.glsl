@@ -33,18 +33,6 @@ mat3 getActiveTBNMatrix(vec2 dx, vec2 dy) {
     );
 }
 
-// Helper function to get total surface height (vertex displacement + detail displacement)
-float getTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
-    float vertexHeight = textureGrad(uVertexDisplacementMap, texCoords, dx, dy).r * uVertexDisplacementScale;
-    float detailHeight = textureGrad(uDisplacementMap, texCoords, dx, dy).r * uDisplacementScale;
-    float totalScale = uVertexDisplacementScale + uDisplacementScale;
-    // Avoid division by zero when scales are zero
-    if (totalScale < 0.001) {
-        return 0.5; // Return neutral height when no displacement
-    }
-    return (vertexHeight + detailHeight) / totalScale;
-}
-
 // Helper function to get displacement height from 0 to uDisplacementScale
 float terrainGetTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
     vec2 repeatedCoords = texCoords * uTextureRepeat;
