@@ -6,6 +6,78 @@ import fragmentShader from './shaders/POM-fragment.glsl?raw';
 import vertexShaderDense from './shaders/standard-vertex.glsl?raw';
 import fragmentShaderDense from './shaders/standard-fragment.glsl?raw';
 
+// ===== GUI PERSISTENCE SYSTEM =====
+// This module handles saving/loading GUI controls to localStorage
+// To remove: delete this section and remove calls to GuiPersistence methods
+class GuiPersistence {
+    private static readonly STORAGE_KEY = 'pom-demo-settings';
+    private static readonly VERSION = '1.0';
+    
+    // Define default values for all controls (excluding camera angle)
+    private static readonly defaults = {
+        displayMode: 'Custom Shader',
+        parallaxScale: 0.075,
+        displacementScale: 0.2,
+        parallaxOffset: 0,
+        textureRepeat: 10.0,
+        dynamicLayers: true,
+        pomMethod: 0,
+        wireframe: false,
+        debugMode: 0,
+        lightDirectionX: 1.0,
+        lightDirectionY: 1.0,
+        enableShadows: true,
+        shadowHardness: 8.0,
+        useSmoothTBN: true,
+        showFpsMonitor: false,
+        showRenderStats: false
+    };
+
+    static saveSettings(settings: Partial<typeof GuiPersistence.defaults>): void {
+        try {
+            const data = {
+                version: this.VERSION,
+                settings: { ...this.defaults, ...settings }
+            };
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
+        } catch (error) {
+            console.warn('Failed to save GUI settings:', error);
+        }
+    }
+
+    static loadSettings(): typeof GuiPersistence.defaults {
+        try {
+            const stored = localStorage.getItem(this.STORAGE_KEY);
+            if (!stored) return { ...this.defaults };
+            
+            const data = JSON.parse(stored);
+            if (data.version !== this.VERSION) {
+                console.log('Settings version mismatch, using defaults');
+                return { ...this.defaults };
+            }
+            
+            return { ...this.defaults, ...data.settings };
+        } catch (error) {
+            console.warn('Failed to load GUI settings:', error);
+            return { ...this.defaults };
+        }
+    }
+
+    static resetToDefaults(): typeof GuiPersistence.defaults {
+        try {
+            localStorage.removeItem(this.STORAGE_KEY);
+        } catch (error) {
+            console.warn('Failed to clear settings:', error);
+        }
+        return { ...this.defaults };
+    }
+
+    static getDefaults(): typeof GuiPersistence.defaults {
+        return { ...this.defaults };
+    }
+}
+// ===== END GUI PERSISTENCE SYSTEM =====
+
 // Performance monitoring class
 class PerformanceMonitor {
     private frames: number = 0;
@@ -232,13 +304,16 @@ class RenderStats {
 const INITIAL_DISPLACEMENT_SCALE = 0.075;
 const INITIAL_VERTEX_DISPLACEMENT_SCALE = 0.2;
 
+// Load saved settings or use defaults
+const savedSettings = GuiPersistence.loadSettings();
+
 // Initialize performance monitoring (hidden by default)
 const performanceMonitor = new PerformanceMonitor();
 const renderStats = new RenderStats();
 
-// Hide performance monitors by default
-performanceMonitor.setVisible(false);
-renderStats.setVisible(false);
+// Apply saved visibility settings to performance monitors
+performanceMonitor.setVisible(savedSettings.showFpsMonitor);
+renderStats.setVisible(savedSettings.showRenderStats);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.001, 100);
@@ -286,17 +361,18 @@ const material = new THREE.ShaderMaterial({
         uNormalMap: { value: normalMap },
         uDisplacementMap: { value: displacementMap },
         uVertexDisplacementMap: { value: vertexDisplacementMap },
-        uDisplacementScale: { value: INITIAL_DISPLACEMENT_SCALE },
-        uVertexDisplacementScale: { value: INITIAL_VERTEX_DISPLACEMENT_SCALE },
-        uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+        uDisplacementScale: { value: savedSettings.parallaxScale / savedSettings.textureRepeat },
+        uVertexDisplacementScale: { value: savedSettings.displacementScale },
+        uParallaxOffset: { value: savedSettings.parallaxOffset },
+        uLightDirection: { value: new THREE.Vector3(savedSettings.lightDirectionX, savedSettings.lightDirectionY, 1.0) },
         uCameraPosition: { value: new THREE.Vector3() },
-        uShadowHardness: { value: 8.0 },
-        uDebugMode: { value: 0 },
-        uEnableShadows: { value: true },
-        uUseDynamicLayers: { value: false },
-        uPOMMethod: { value: 0 },
-        uTextureRepeat: { value: 10.0 },
-        uUseSmoothTBN: { value: false },
+        uShadowHardness: { value: savedSettings.shadowHardness },
+        uDebugMode: { value: savedSettings.debugMode },
+        uEnableShadows: { value: savedSettings.enableShadows },
+        uUseDynamicLayers: { value: savedSettings.dynamicLayers },
+        uPOMMethod: { value: savedSettings.pomMethod },
+        uTextureRepeat: { value: savedSettings.textureRepeat },
+        uUseSmoothTBN: { value: savedSettings.useSmoothTBN },
     },
 });
 
@@ -317,19 +393,31 @@ const denseMaterial = new THREE.ShaderMaterial({
         uNormalMap: { value: normalMap },
         uDisplacementMap: { value: displacementMap },
         uVertexDisplacementMap: { value: vertexDisplacementMap },
-        uDisplacementScale: { value: INITIAL_DISPLACEMENT_SCALE },
-        uVertexDisplacementScale: { value: INITIAL_VERTEX_DISPLACEMENT_SCALE },
-        uLightDirection: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+        uDisplacementScale: { value: savedSettings.parallaxScale / savedSettings.textureRepeat },
+        uVertexDisplacementScale: { value: savedSettings.displacementScale },
+        uLightDirection: { value: new THREE.Vector3(savedSettings.lightDirectionX, savedSettings.lightDirectionY, 1.0) },
         uCameraPosition: { value: new THREE.Vector3() },
-        uTextureRepeat: { value: 10.0 },
+        uTextureRepeat: { value: savedSettings.textureRepeat },
     },
 });
 
 const densePlane = new THREE.Mesh(denseGeometry, denseMaterial);
-// Center the standard mesh and initially hide it
+// Center the standard mesh and apply saved settings
 densePlane.position.x = 0;
-densePlane.visible = false;
 scene.add(densePlane);
+
+// Apply wireframe setting from saved settings
+material.wireframe = savedSettings.wireframe;
+denseMaterial.wireframe = savedSettings.wireframe;
+
+// Apply display mode from saved settings
+if (savedSettings.displayMode === 'Standard Mesh') {
+    plane.visible = false;
+    densePlane.visible = true;
+} else {
+    plane.visible = true;
+    densePlane.visible = false;
+}
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -338,7 +426,7 @@ const gui = new GUI();
 
 // Display mode control
 const displayControl = {
-    mode: 'Custom Shader'
+    mode: savedSettings.displayMode
 };
 
 const displayModeOptions = {
@@ -354,6 +442,8 @@ gui.add(displayControl, 'mode', displayModeOptions).name('Display Mode').onChang
         plane.visible = false;
         densePlane.visible = true;
     }
+    // Save setting
+    GuiPersistence.saveSettings({ displayMode: value });
 });
 
 // Helper function to get currently active material
@@ -368,8 +458,8 @@ function syncUniformToBoth(uniformName: string, value: any): void {
 }
 
 // Store the raw GUI values
-let rawParallaxScale = INITIAL_DISPLACEMENT_SCALE;
-let textureRepeat = 10.0;
+let rawParallaxScale = savedSettings.parallaxScale;
+let textureRepeat = savedSettings.textureRepeat;
 
 // Helper function to update parallax scale with texture repeat compensation
 function updateParallaxScale(): void {
@@ -383,15 +473,22 @@ updateParallaxScale();
 gui.add({ value: rawParallaxScale }, 'value', 0, 0.2, 0.001).name('Parallax Scale').onChange((value: number) => {
     rawParallaxScale = value;
     updateParallaxScale();
+    GuiPersistence.saveSettings({ parallaxScale: value });
 });
 gui.add(material.uniforms.uVertexDisplacementScale, 'value', 0, 0.5, 0.001).name('Displacement Scale').onChange((value: number) => {
     syncUniformToBoth('uVertexDisplacementScale', value);
+    GuiPersistence.saveSettings({ displacementScale: value });
+});
+
+gui.add(material.uniforms.uParallaxOffset, 'value', -1.0, 1.0, 0.01).name('Parallax Offset').onChange((value: number) => {
+    GuiPersistence.saveSettings({ parallaxOffset: value });
 });
 
 gui.add({ value: textureRepeat }, 'value', 1.0, 50.0, 0.1).name('Texture Repeat').onChange((value: number) => {
     textureRepeat = value;
     syncUniformToBoth('uTextureRepeat', value);
     updateParallaxScale(); // Update parallax scale when texture repeat changes
+    GuiPersistence.saveSettings({ textureRepeat: value });
 });
 
 // Add debug mode control
@@ -408,15 +505,18 @@ const debugModeOptions = {
 
 
 // Add dynamic layers control
-gui.add(material.uniforms.uUseDynamicLayers, 'value').name('Dynamic Layers (vs Fixed)');
+gui.add(material.uniforms.uUseDynamicLayers, 'value').name('Dynamic Layers (vs Fixed)').onChange((value: boolean) => {
+    GuiPersistence.saveSettings({ dynamicLayers: value });
+});
 
 // Add POM method selection
 const pomMethodOptions = {
     'Standard POM': 0,
-    'Terrain POM': 1,
-    'Full POM': 2
+    'Terrain POM': 1
 };
-gui.add(material.uniforms.uPOMMethod, 'value', pomMethodOptions).name('POM Method');
+gui.add(material.uniforms.uPOMMethod, 'value', pomMethodOptions).name('POM Method').onChange((value: number) => {
+    GuiPersistence.saveSettings({ pomMethod: value });
+});
 
 // Add camera angle control
 const cameraControl = {
@@ -433,14 +533,17 @@ function updateCameraPosition(angle: number) {
 
 // Add wireframe toggle
 const wireframeControl = {
-    wireframe: false
+    wireframe: savedSettings.wireframe
 };
 gui.add(wireframeControl, 'wireframe').name('Wireframe').onChange((value: boolean) => {
     material.wireframe = value;
     denseMaterial.wireframe = value;
+    GuiPersistence.saveSettings({ wireframe: value });
 });
 
-gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mode');
+gui.add(material.uniforms.uDebugMode, 'value', debugModeOptions).name('Debug Mode').onChange((value: number) => {
+    GuiPersistence.saveSettings({ debugMode: value });
+});
 
 const lightFolder = gui.addFolder('Lighting');
 lightFolder.close(); // Close folder by default
@@ -450,21 +553,29 @@ lightFolder.add(cameraControl, 'angle', -90, 90, 1).name('Camera Angle (°)').on
 lightFolder.add(material.uniforms.uLightDirection.value, 'x', -1, 1, 0.01).name('Light Direction X').onChange((value: number) => {
     material.uniforms.uLightDirection.value.x = value;
     denseMaterial.uniforms.uLightDirection.value.x = value;
+    GuiPersistence.saveSettings({ lightDirectionX: value });
 });
 lightFolder.add(material.uniforms.uLightDirection.value, 'y', -1, 1, 0.01).name('Light Direction Y').onChange((value: number) => {
     material.uniforms.uLightDirection.value.y = value;
     denseMaterial.uniforms.uLightDirection.value.y = value;
+    GuiPersistence.saveSettings({ lightDirectionY: value });
 });
-lightFolder.add(material.uniforms.uEnableShadows, 'value').name('Enable Shadows');
-lightFolder.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness');
-lightFolder.add(material.uniforms.uUseSmoothTBN, 'value').name('Use Smooth TBN');
+lightFolder.add(material.uniforms.uEnableShadows, 'value').name('Enable Shadows').onChange((value: boolean) => {
+    GuiPersistence.saveSettings({ enableShadows: value });
+});
+lightFolder.add(material.uniforms.uShadowHardness, 'value', 1.0, 32.0, 1.0).name('Shadow Hardness').onChange((value: number) => {
+    GuiPersistence.saveSettings({ shadowHardness: value });
+});
+lightFolder.add(material.uniforms.uUseSmoothTBN, 'value').name('Use Smooth TBN').onChange((value: boolean) => {
+    GuiPersistence.saveSettings({ useSmoothTBN: value });
+});
 
 // Performance monitoring controls
 const perfFolder = gui.addFolder('Performance Monitor');
 perfFolder.close(); // Close folder by default
 const perfControls = {
-    showFpsMonitor: false,
-    showRenderStats: false,
+    showFpsMonitor: savedSettings.showFpsMonitor,
+    showRenderStats: savedSettings.showRenderStats,
     resetStats: () => {
         performanceMonitor.reset();
         console.log('Performance statistics reset');
@@ -473,13 +584,70 @@ const perfControls = {
 
 perfFolder.add(perfControls, 'showFpsMonitor').name('Show FPS Monitor').onChange((value: boolean) => {
     performanceMonitor.setVisible(value);
+    GuiPersistence.saveSettings({ showFpsMonitor: value });
 });
 
 perfFolder.add(perfControls, 'showRenderStats').name('Show Render Stats').onChange((value: boolean) => {
     renderStats.setVisible(value);
+    GuiPersistence.saveSettings({ showRenderStats: value });
 });
 
 perfFolder.add(perfControls, 'resetStats').name('Reset Statistics');
+
+// Add reset button at the bottom
+const resetControls = {
+    resetToDefaults: () => {
+        // Reset to defaults
+        const defaults = GuiPersistence.resetToDefaults();
+        
+        // Update all GUI controls
+        displayControl.mode = defaults.displayMode;
+        rawParallaxScale = defaults.parallaxScale;
+        textureRepeat = defaults.textureRepeat;
+        wireframeControl.wireframe = defaults.wireframe;
+        perfControls.showFpsMonitor = defaults.showFpsMonitor;
+        perfControls.showRenderStats = defaults.showRenderStats;
+        
+        // Update material uniforms
+        material.uniforms.uVertexDisplacementScale.value = defaults.displacementScale;
+        material.uniforms.uParallaxOffset.value = defaults.parallaxOffset;
+        material.uniforms.uDebugMode.value = defaults.debugMode;
+        material.uniforms.uUseDynamicLayers.value = defaults.dynamicLayers;
+        material.uniforms.uPOMMethod.value = defaults.pomMethod;
+        material.uniforms.uLightDirection.value.x = defaults.lightDirectionX;
+        material.uniforms.uLightDirection.value.y = defaults.lightDirectionY;
+        material.uniforms.uEnableShadows.value = defaults.enableShadows;
+        material.uniforms.uShadowHardness.value = defaults.shadowHardness;
+        material.uniforms.uUseSmoothTBN.value = defaults.useSmoothTBN;
+        
+        // Sync uniforms to both materials
+        syncUniformToBoth('uVertexDisplacementScale', defaults.displacementScale);
+        syncUniformToBoth('uTextureRepeat', defaults.textureRepeat);
+        updateParallaxScale();
+        syncUniformToBoth('uLightDirection', new THREE.Vector3(defaults.lightDirectionX, defaults.lightDirectionY, 1.0));
+        
+        // Update wireframe
+        material.wireframe = defaults.wireframe;
+        denseMaterial.wireframe = defaults.wireframe;
+        
+        // Update display mode
+        if (defaults.displayMode === 'Standard Mesh') {
+            plane.visible = false;
+            densePlane.visible = true;
+        } else {
+            plane.visible = true;
+            densePlane.visible = false;
+        }
+        
+        // Update performance monitors
+        performanceMonitor.setVisible(defaults.showFpsMonitor);
+        renderStats.setVisible(defaults.showRenderStats);
+        
+        console.log('GUI controls reset to defaults');
+    }
+};
+
+gui.add(resetControls, 'resetToDefaults').name('🔄 Reset to Defaults');
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;

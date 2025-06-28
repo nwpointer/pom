@@ -13,6 +13,7 @@ uniform sampler2D uDisplacementMap;
 uniform sampler2D uVertexDisplacementMap;
 uniform float uDisplacementScale;
 uniform float uVertexDisplacementScale;
+uniform float uParallaxOffset;
 uniform vec3 uCameraPosition;
 uniform vec3 uLightDirection;
 uniform float uShadowHardness;
@@ -20,7 +21,7 @@ uniform int uDebugMode; // 0=off, 1=tangent, 2=bitangent, 3=normal, 4=view_dir
 
 uniform bool uEnableShadows; // true=shadows enabled, false=shadows disabled
 uniform bool uUseDynamicLayers; // true=dynamic layers based on view angle, false=fixed layers
-uniform int uPOMMethod; // 0=standard, 1=terrain, 2=full
+uniform int uPOMMethod; // 0=standard, 1=terrain
 uniform float uTextureRepeat; // Number of times to repeat the parallax textures
 
 
@@ -34,11 +35,11 @@ mat3 getActiveTBNMatrix(vec2 dx, vec2 dy) {
 }
 
 // Helper function to get displacement height from 0 to uDisplacementScale
-float terrainGetTotalSurfaceHeight(vec2 texCoords, vec2 dx, vec2 dy) {
+float getHeight(vec2 texCoords, vec2 dx, vec2 dy) {
     vec2 repeatedCoords = texCoords * uTextureRepeat;
     vec2 repeatedDx = dx * uTextureRepeat;
     vec2 repeatedDy = dy * uTextureRepeat;
-    return (textureGrad(uDisplacementMap, repeatedCoords, repeatedDx, repeatedDy).r) * uDisplacementScale ;
+    return (textureGrad(uDisplacementMap, repeatedCoords, repeatedDx, repeatedDy).r + uParallaxOffset) * uDisplacementScale ;
 }
 
 // Standard basic parallax occlusion mapping - simplest implementation
@@ -48,7 +49,7 @@ vec3 standardParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     if (uUseDynamicLayers) {
         // Dynamic layers based on view angle for performance
         const float minLayers = 8.0;
-        const float maxLayers = 32.0*4.0;
+        const float maxLayers = 64.0;;
         numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), V)));
     } else {
         // Fixed number of layers
@@ -61,18 +62,15 @@ vec3 standardParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     
     // Simple ray marching
     vec2 currentTexCoords = vUv;
-    float currentLayerHeight = 1.0;
-    float layerDepth = 1.0 / numLayers;
+    float currentLayerHeight = uDisplacementScale; // Start from max height like terrain POM
+    float layerDepth = uDisplacementScale / numLayers; // Scale layer depth
     
     // Basic coarse search to find intersection interval
     vec2 prevTexCoords = currentTexCoords;
     float prevLayerHeight = currentLayerHeight;
     
     for(float i = 0.0; i < numLayers; i += 1.0) {
-        vec2 repeatedCoords = currentTexCoords * uTextureRepeat;
-        vec2 repeatedDx = dx * uTextureRepeat;
-        vec2 repeatedDy = dy * uTextureRepeat;
-        float currentDepthMapValue = textureGrad(uDisplacementMap, repeatedCoords, repeatedDx, repeatedDy).r;
+        float currentDepthMapValue = getHeight(currentTexCoords, dx, dy);
         
         if (currentDepthMapValue >= currentLayerHeight) {
             break;
@@ -91,10 +89,7 @@ vec3 standardParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     for(int i = 0; i < numRefinementSteps; i++) {
         vec2 midTexCoords = mix(currentTexCoords, prevTexCoords, 0.5);
         float midLayerHeight = mix(currentLayerHeight, prevLayerHeight, 0.5);
-        vec2 midRepeatedCoords = midTexCoords * uTextureRepeat;
-        vec2 midRepeatedDx = dx * uTextureRepeat;
-        vec2 midRepeatedDy = dy * uTextureRepeat;
-        float midDepthMapValue = textureGrad(uDisplacementMap, midRepeatedCoords, midRepeatedDx, midRepeatedDy).r;
+        float midDepthMapValue = getHeight(midTexCoords, dx, dy);
 
         if (midDepthMapValue < midLayerHeight) {
             prevTexCoords = midTexCoords;
@@ -106,23 +101,16 @@ vec3 standardParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     }
 
     // Final linear interpolation for smooth transition
-    vec2 afterRepeatedCoords = currentTexCoords * uTextureRepeat;
-    vec2 afterRepeatedDx = dx * uTextureRepeat;
-    vec2 afterRepeatedDy = dy * uTextureRepeat;
-    float afterDepth = textureGrad(uDisplacementMap, afterRepeatedCoords, afterRepeatedDx, afterRepeatedDy).r - currentLayerHeight;
-    
-    vec2 beforeRepeatedCoords = prevTexCoords * uTextureRepeat;
-    vec2 beforeRepeatedDx = dx * uTextureRepeat;
-    vec2 beforeRepeatedDy = dy * uTextureRepeat;
-    float beforeDepth = textureGrad(uDisplacementMap, beforeRepeatedCoords, beforeRepeatedDx, beforeRepeatedDy).r - prevLayerHeight;
+    float afterDepth = getHeight(currentTexCoords, dx, dy) - currentLayerHeight;
+    float beforeDepth = getHeight(prevTexCoords, dx, dy) - prevLayerHeight;
     float weight = afterDepth / (afterDepth - beforeDepth);
     vec2 finalTexCoords = mix(currentTexCoords, prevTexCoords, weight);
     
     float alpha = 1.0;
-    // if (finalTexCoords.x < 0.0 || finalTexCoords.x > 1.0 || 
-    //     finalTexCoords.y < 0.0 || finalTexCoords.y > 1.0) {
-    //     alpha = 0.0;
-    // }
+    if (finalTexCoords.x < 0.0 || finalTexCoords.x > 1.0 || 
+        finalTexCoords.y < 0.0 || finalTexCoords.y > 1.0) {
+        alpha = 0.0;
+    }
     
     return vec3(finalTexCoords, alpha);
 }
@@ -137,7 +125,7 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
         numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), V)));
     } else {
         // Fixed number of layers
-        numLayers = 32.0;
+        numLayers = 16.0;
     }
     
     // Smooth V.z influence for stable parallax
@@ -150,7 +138,7 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     // Step along the displaced surface
     vec2 currentTexCoords = vUv;
     float currentLayerHeight = uDisplacementScale; // Start from max height
-    float currentDepthMapValue = terrainGetTotalSurfaceHeight(currentTexCoords, dx, dy);
+    float currentDepthMapValue = getHeight(currentTexCoords, dx, dy);
 
     // Step through layers, but adjust step size based on surface slope
     vec2 prevTexCoords = vUv;
@@ -165,7 +153,7 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
         
         // Sample surface height at next position to get surface slope
         vec2 nextTexCoords = currentTexCoords - deltaTexCoords;
-        float nextDepthMapValue = terrainGetTotalSurfaceHeight(nextTexCoords, dx, dy);
+        float nextDepthMapValue = getHeight(nextTexCoords, dx, dy);
         
         // Calculate surface slope and adjust our stepping
         float surfaceSlope = (nextDepthMapValue - currentDepthMapValue);
@@ -183,7 +171,7 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     for(int i = 0; i < numRefinementSteps; i++) {
         vec2 midTexCoords = mix(currentTexCoords, prevTexCoords, 0.5);
         float midLayerHeight = mix(currentLayerHeight, prevLayerHeight, 0.5);
-        float midDepthMapValue = terrainGetTotalSurfaceHeight(midTexCoords, dx, dy);
+        float midDepthMapValue = getHeight(midTexCoords, dx, dy);
 
         if (midDepthMapValue < midLayerHeight) {
             prevTexCoords = midTexCoords;
@@ -195,8 +183,8 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     }
 
     // Final linear interpolation on the highly refined interval
-    float afterDepth = terrainGetTotalSurfaceHeight(currentTexCoords, dx, dy) - currentLayerHeight;
-    float beforeDepth = terrainGetTotalSurfaceHeight(prevTexCoords, dx, dy) - prevLayerHeight;
+    float afterDepth = getHeight(currentTexCoords, dx, dy) - currentLayerHeight;
+    float beforeDepth = getHeight(prevTexCoords, dx, dy) - prevLayerHeight;
     float weight = afterDepth / (afterDepth - beforeDepth);
     vec2 finalTexCoords = mix(currentTexCoords, prevTexCoords, weight);
 
@@ -209,65 +197,7 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     return vec3(finalTexCoords, alpha);
 }
 
-vec3 parallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
-    // Determine number of layers - dynamic or fixed
-    float numLayers;
-    if (uUseDynamicLayers) {
-        // Dynamic layers based on view angle for performance
-        const float minLayers = 16.0;
-        const float maxLayers = 32.0*8.0;
-        numLayers = mix(maxLayers, minLayers, abs(dot(vec3(0.0, 0.0, 1.0), V)));
-    } else {
-        // Fixed number of layers
-        numLayers = 32.0;
-    }
 
-    float layerDepth = 1.0 / numLayers;
-    vec2 P = V.xy / V.z * uDisplacementScale; // Only use detail displacement for parallax
-    vec2 deltaTexCoords = P / numLayers;
-
-    // Coarse search to find an interval containing the intersection
-    vec2  currentTexCoords = vUv;
-    float currentLayerHeight = 1.0;
-    float currentDepthMapValue = textureGrad(uDisplacementMap, currentTexCoords, dx, dy).r;
-
-    while(currentDepthMapValue < currentLayerHeight) {
-        currentLayerHeight -= layerDepth;
-        currentTexCoords -= deltaTexCoords;
-        currentDepthMapValue = textureGrad(uDisplacementMap, currentTexCoords, dx, dy).r;
-    }
-
-    // Refined search using binary search (Interval Mapping)
-    vec2 prevTexCoords = currentTexCoords + deltaTexCoords;
-    float prevLayerHeight = currentLayerHeight + layerDepth;
-    const int numRefinementSteps = 8;
-    for(int i = 0; i < numRefinementSteps; i++) {
-        vec2 midTexCoords = mix(currentTexCoords, prevTexCoords, 0.5);
-        float midLayerHeight = mix(currentLayerHeight, prevLayerHeight, 0.5);
-        float midDepthMapValue = textureGrad(uDisplacementMap, midTexCoords, dx, dy).r;
-
-        if (midDepthMapValue < midLayerHeight) {
-            prevTexCoords = midTexCoords;
-            prevLayerHeight = midLayerHeight;
-        } else {
-            currentTexCoords = midTexCoords;
-            currentLayerHeight = midLayerHeight;
-        }
-    }
-
-    // Final linear interpolation on the highly refined interval
-    float afterDepth = textureGrad(uDisplacementMap, currentTexCoords, dx, dy).r - currentLayerHeight;
-    float beforeDepth = textureGrad(uDisplacementMap, prevTexCoords, dx, dy).r - prevLayerHeight;
-    float weight = afterDepth / (afterDepth - beforeDepth);
-    vec2 finalTexCoords = mix(currentTexCoords, prevTexCoords, weight);
-
-    float alpha = 1.0;
-    if (finalTexCoords.x < 0.0 || finalTexCoords.x > 1.0 || finalTexCoords.y < 0.0 || finalTexCoords.y > 1.0) {
-        alpha = 0.0;
-    }
-
-    return vec3(finalTexCoords, alpha);
-}
 
 float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
     if (tangentLightDir.z <= 0.0) return 0.0;
@@ -287,7 +217,7 @@ float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
         
         // Sample height using repeated coordinates
         vec2 repeatedTexCoords = currentTexCoords * uTextureRepeat;
-        float heightAtSample = textureGrad(uDisplacementMap, repeatedTexCoords, repeatedDx, repeatedDy).r;
+        float heightAtSample = textureGrad(uDisplacementMap, repeatedTexCoords, repeatedDx, repeatedDy).r + uParallaxOffset;
         
         if (currentRayHeight < heightAtSample) {
             shadow += 1.0;
@@ -320,12 +250,9 @@ void main() {
         if (uPOMMethod == 0) {
             // Standard POM - simplest implementation
             pomResult = standardParallaxOcclusionMap(tangentViewDir, dx, dy);
-        } else if (uPOMMethod == 1) {
+        } else {
             // Terrain POM - with surface slope adjustments
             pomResult = terrainParallaxOcclusionMap(tangentViewDir, dx, dy);
-        } else {
-            // Full POM - with binary search refinement
-            pomResult = parallaxOcclusionMap(tangentViewDir, dx, dy);
         }
         parallaxUv = pomResult.xy;
         alpha = pomResult.z;
@@ -381,7 +308,7 @@ void main() {
             debugColor = vec3(uvOffset * 10.0, 0.0); // Scale up offset for visibility
         } else if (uDebugMode == 6) {
             // Visualize Height Map
-            float height = terrainGetTotalSurfaceHeight(parallaxUv, dx, dy) / uDisplacementScale;
+            float height = getHeight(parallaxUv, dx, dy) / uDisplacementScale;
             debugColor = vec3(height);
         }
         
