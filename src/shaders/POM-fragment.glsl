@@ -57,7 +57,7 @@ vec3 standardParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     }
     
     // Basic parallax offset calculation
-    vec2 P = V.xy / max(V.z, 0.001) * uDisplacementScale;
+    vec2 P = V.xy / max(V.z, 0.00001) * uDisplacementScale;
     vec2 deltaTexCoords = P / numLayers;
     
     // Simple ray marching
@@ -129,9 +129,9 @@ vec3 terrainParallaxOcclusionMap(vec3 V, vec2 dx, vec2 dy) {
     }
     
     // Smooth V.z influence for stable parallax
-    float smoothVz = smoothstep(0.0, 1.5, abs(V.z)); // Smooth S-curve transition
-    float reducedVz = mix(0.5, 1.0, smoothVz); // Blend with smoother transition
-    // vec2 P = V.xy / reducedVz * uDisplacementScale;
+    float smoothVz = smoothstep(0.0, 1.0, abs(V.z)); // Smooth S-curve transition
+    float reducedVz = mix(0.55, 1.0, abs(V.z)); // Blend with smoother transition
+    // vec2 P = V.xy / V.z * uDisplacementScale;
     vec2 P = V.xy / reducedVz * uDisplacementScale;
     vec2 deltaTexCoords = P / numLayers;
 
@@ -205,7 +205,7 @@ float getShadow(vec3 surfacePos, vec3 tangentLightDir, vec2 dx, vec2 dy) {
     float shadow = 0.0;
     const int numSamples = 32;
     float rayStep = 1.0 / float(numSamples);
-    vec2 texStep = rayStep * (tangentLightDir.xy / max(tangentLightDir.z, 0.001)) * uDisplacementScale;
+    vec2 texStep = rayStep * (tangentLightDir.xy / max(tangentLightDir.z, 0.00001)) * uDisplacementScale;
     float currentRayHeight = surfacePos.z + rayStep;
     vec2 currentTexCoords = surfacePos.xy + texStep;
     
@@ -245,7 +245,7 @@ void main() {
     vec2 parallaxUv;
     float alpha = 1.0;
     
-    if (uDisplacementScale < 0.001) {
+    if (uDisplacementScale < 0.00001) {
         // No parallax displacement, use original UVs (skip POM calculation)
         parallaxUv = vUv;
     } else {
@@ -304,7 +304,7 @@ void main() {
     
     float shadow;
     
-    if (!uEnableShadows || uDisplacementScale < 0.001) {
+    if (!uEnableShadows || uDisplacementScale < 0.00001) {
         // Shadows disabled or no parallax displacement, no self-shadowing
         shadow = 1.0;
     } else {

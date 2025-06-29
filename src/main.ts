@@ -324,14 +324,14 @@ document.body.appendChild(renderer.domElement);
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
 // Set initial camera angle to 45 degrees
-const initialAngle = 45; // degrees
+const initialAngle = 88; // degrees
 const radius = 0.5; // Zoomed in closer
 camera.position.y = Math.sin(-initialAngle * Math.PI / 180) * radius;
 camera.position.z = Math.cos(-initialAngle * Math.PI / 180) * radius;
 camera.position.x = 0.0;
 camera.lookAt(0, 0, 0);
 
-const geometry = new THREE.PlaneGeometry(1, 1, 18, 18);
+const geometry = new THREE.PlaneGeometry(1, 1, 1024/4, 1024/4);
 geometry.computeTangents();
 
 const loader = new THREE.TextureLoader();
@@ -347,10 +347,10 @@ const displacementMap = loader.load('/gray_rocks/gray_rocks_disp_2k.jpg');
 displacementMap.anisotropy = maxAnisotropy;
 displacementMap.wrapS = THREE.RepeatWrapping;
 displacementMap.wrapT = THREE.RepeatWrapping;
-const vertexDisplacementMap = loader.load('/hill.jpg');
+const vertexDisplacementMap = loader.load('/displacement/heightmap.png');
 vertexDisplacementMap.anisotropy = maxAnisotropy;
-vertexDisplacementMap.wrapS = THREE.RepeatWrapping;
-vertexDisplacementMap.wrapT = THREE.RepeatWrapping;
+vertexDisplacementMap.wrapS = THREE.ClampToEdgeWrapping;
+vertexDisplacementMap.wrapT = THREE.ClampToEdgeWrapping;
 
 const material = new THREE.ShaderMaterial({
     vertexShader,
@@ -484,7 +484,7 @@ gui.add(material.uniforms.uParallaxOffset, 'value', -1.0, 1.0, 0.01).name('Paral
     GuiPersistence.saveSettings({ parallaxOffset: value });
 });
 
-gui.add({ value: textureRepeat }, 'value', 1.0, 50.0, 0.1).name('Texture Repeat').onChange((value: number) => {
+gui.add({ value: textureRepeat }, 'value', 1.0, 150.0, 0.1).name('Texture Repeat').onChange((value: number) => {
     textureRepeat = value;
     syncUniformToBoth('uTextureRepeat', value);
     updateParallaxScale(); // Update parallax scale when texture repeat changes
