@@ -1,5 +1,10 @@
 Landscape material
 
+- POM!
+    + shadows
+    - optimizations
+    - edge rounding
+
 - some kind of simple quad tree for mesh optimization
 - splating w/ multiple blending options
     - height

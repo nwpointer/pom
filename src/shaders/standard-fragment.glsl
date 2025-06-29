@@ -7,6 +7,9 @@ uniform sampler2D uNormalMap;
 uniform vec3 uCameraPosition;
 uniform vec3 uLightDirection;
 uniform float uTextureRepeat;
+uniform float uActiveRadius;
+uniform float uMinLayers;
+uniform float uMaxLayers;
 
 void main() {
     // Sample textures directly without parallax mapping
